@@ -1,0 +1,54 @@
+# omen-kbd configuration. Zone order everywhere: left, middle, right, wasd.
+[device]
+zone_map = { left = 2, middle = 1, right = 0, wasd = 3 }
+
+[effects]
+enabled = false   # animations are opt-in (colors may live in non-volatile memory)
+fps = 10
+
+[theme]
+colors = "vivid"  # or "exact"
+dir = "~/.config/theming/current"
+
+[gates]
+on_lock = "off"
+on_idle = "dim"
+dim_brightness = 20
+pause_effects_on_battery = true
+
+[hints]
+timeout_s = 15
+delay_ms = 250
+[hints.modifiers]
+super = "theme:mauve"
+"super+shift" = "theme:blue"
+ctrl = "theme:peach"
+[hints.submaps]
+resize = "theme:teal"
+
+[[profiles]]
+name = "default"
+colors = ["theme:mauve", "theme:blue", "theme:teal", "theme:peach"]
+
+[[profiles]]
+name = "game"
+colors = ["#202020", "#202020", "#202020", "#ff0000"]
+
+[[profiles]]
+name = "white"
+colors = ["#ffffff"]
+
+[[rules]]
+name = "gamemode"
+when = { gamemode = true }
+profile = "game"
+
+[[rules]]
+name = "power saver dims"
+when = { power_profile = "power-saver" }
+brightness_cap = 40
+
+[[rules]]
+name = "low battery"
+when = { on_battery = true, battery_below = 15 }
+overlay = { zones = ["right"], color = "#ff0000", pulse = true }
