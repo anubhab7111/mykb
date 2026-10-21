@@ -5,10 +5,10 @@
 #include "backend/backend.hpp"
 #include "config.hpp"
 #include "core/compositor.hpp"
+#include "daemon/clock.hpp"
 #include "ipc/protocol.hpp"
 #include "state.hpp"
 
-#include <chrono>
 #include <expected>
 #include <optional>
 #include <string>
@@ -18,9 +18,6 @@
 #include <vector>
 
 namespace omenkbd {
-
-using Clock = std::chrono::steady_clock;
-using TimePoint = Clock::time_point;
 
 /// A change in what the daemon knows about the system.
 namespace fact {
