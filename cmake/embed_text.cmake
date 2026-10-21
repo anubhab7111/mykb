@@ -1,0 +1,17 @@
+# embed_text(<input> <output-header> <name>)
+# Writes a header defining `inline constexpr std::string_view <name>` with the input file's text.
+# The header is rewritten only when the text changes, and editing the input re-runs CMake.
+function(embed_text input output name)
+    file(READ ${input} content)
+    set(text "#pragma once\n#include <string_view>\n\nnamespace omenkbd {\n")
+    string(APPEND text "inline constexpr std::string_view ${name} = R\"omenkbd(${content})omenkbd\";\n")
+    string(APPEND text "} // namespace omenkbd\n")
+    set(old "")
+    if(EXISTS ${output})
+        file(READ ${output} old)
+    endif()
+    if(NOT "${old}" STREQUAL "${text}")
+        file(WRITE ${output} "${text}")
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${input})
+endfunction()
