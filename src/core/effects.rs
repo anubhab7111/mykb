@@ -93,7 +93,7 @@ pub fn render(effect: Effect, base: &Frame, t: f64, speed: u8) -> Frame {
 }
 
 /// Multiplies every channel by `f` in [0, 1], rounding half away from zero.
-fn multiply(c: Rgb, f: f64) -> Rgb {
+pub(crate) fn multiply(c: Rgb, f: f64) -> Rgb {
     let m = |x: u8| (f64::from(x) * f.clamp(0.0, 1.0)).round() as u8;
     Rgb::new(m(c.r), m(c.g), m(c.b))
 }
