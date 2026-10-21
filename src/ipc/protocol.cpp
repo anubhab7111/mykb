@@ -179,6 +179,8 @@ std::expected<Request, std::string> decode_request(std::string_view line) {
     }
 }
 
+std::string encode_status(const Status &s, int indent) { return status_json(s).dump(indent); }
+
 std::string encode(const Response &r) {
     return ojson{{"ok", r.ok},
                  {"error", opt_json(r.error)},
