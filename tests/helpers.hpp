@@ -1,7 +1,12 @@
 #pragma once
 // Test-only helpers: temporary directories, file I/O and polling.
 
+#include "core/color.hpp"
+
+#include <gtest/gtest.h>
+
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -54,6 +59,13 @@ inline void write_file(const std::filesystem::path &p, std::string_view content)
 inline std::string read_file(const std::filesystem::path &p) {
     std::ifstream f(p, std::ios::binary);
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
+
+/// Every channel of `a` within `tol` of `b`.
+inline void expect_close(Rgb a, Rgb b, int tol) {
+    const auto near = [tol](std::uint8_t x, std::uint8_t y) { return std::abs(x - y) <= tol; };
+    EXPECT_TRUE(near(a.r, b.r) && near(a.g, b.g) && near(a.b, b.b))
+        << a << " not within " << tol << " of " << b;
 }
 
 /// Polls `cond` every 10 ms until it holds or `timeout` passes; returns the final result.
