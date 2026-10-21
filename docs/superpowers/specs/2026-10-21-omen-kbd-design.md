@@ -147,7 +147,8 @@ future mainline LED backend drops in and the custom module can be deleted.
 
 ### Calls Claude made (please check while reading)
 
-- Rust for the daemon/CLI (one binary), C DKMS module; Unix-socket JSON IPC instead of D-Bus.
+- One binary for daemon + CLI (C++23 — the user's choice, replacing the original Rust call), C DKMS
+  module; Unix-socket JSON IPC instead of D-Bus.
 - The kernel module exposes **sysfs + a group** (`omen-kbd`) rather than a `/dev` node with seat ACLs.
 - Allowlist is **board 8A4E only**; `readonly=1` by default until P4 is signed off.
 - Default limits: ≥ 50 ms between writes, 40 000 writes/hour budget, 10 fps effect default (max 20).
@@ -369,19 +370,26 @@ hourly write budget remaining.
 (or to a log) and never touches hardware. All features except the final sysfs write are developed and
 tested against it. The real backend is never chosen implicitly as a fallback, and vice-versa.
 
-### Language & stack (my call)
+### Language & stack (user's decision, 2026-10-22)
 
-Rust (matches the omen-space ecosystem the user already builds; low idle overhead): `tokio`, `zbus`
-(system bus client only), `serde`/`toml`, `clap`, `inotify`. C for the kernel module. Arch `PKGBUILD`
-for both (module as `*-dkms`).
+**C++23** for the daemon/CLI, so the user can maintain it themselves (a Rust prototype of plan Tasks
+1–13 exists at git tag `rust-prototype` and is the behavioural reference for the port). GCC 16 / Clang
+23, CMake + Ninja, GoogleTest; system libraries only: `sdbus-c++` (system-bus client, integrated into
+the daemon's own `epoll` loop), `nlohmann-json` (IPC + state), `toml++` (config), `CLI11` (CLI).
+One `epoll` event loop on the main thread plus one writer thread that owns the backend.
+Tests run under AddressSanitizer + UndefinedBehaviorSanitizer. C for the kernel module. Arch
+`PKGBUILD` for both (module as `*-dkms`).
 
 ### Repository layout (`~/Documents/dev/mykb`)
 
 ```
 kernel/hp-omen-kbd/   hp_omen_kbd.c, Makefile, dkms.conf
-src/                  core/ (color, zones, layers, effects, rules — pure, no I/O)
-                      backend/ (trait Backend; hp-omen-kbd sysfs; mainline-led; mock)
-                      sources/ (hyprland, dbus, theme, hwmon) ipc/ cli/ daemon.rs main.rs
+CMakeLists.txt        C++23 targets: omenkbd (library), omen-kbd (binary), omen-kbd-tests
+src/                  core/ (color, zones, palette, effects, rules, compositor — pure, no I/O)
+                      backend/ (Backend interface; hp-omen-kbd sysfs; mainline-led; mock)
+                      ipc/ daemon/ (model, event loop, writer, daemon) sources/ (hyprland, theme,
+                      hwmon, system D-Bus) cli/ util/ main.cpp
+tests/                GoogleTest unit + integration tests (mock backend, fake sysfs trees)
 packaging/            omen-kbd.service (user), 99-omen-kbd.rules, sysusers.d, modules-load.d,
                       PKGBUILD, example config.toml, waybar snippet, hypridle/autostart snippets
                       (kbdlight.lua comes from `omen-kbd gen-hyprland`)
