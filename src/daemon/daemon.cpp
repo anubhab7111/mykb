@@ -1,6 +1,9 @@
 #include "daemon/daemon.hpp"
 
 #include "backend/mock.hpp"
+#include "sources/hwmon.hpp"
+#include "sources/hyprland.hpp"
+#include "sources/theme.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -309,6 +312,9 @@ void Daemon::on_request(std::uint64_t id, Client &c, const Request &r) {
         }
         Palette p = palette ? std::move(*palette) : model_.palette();
         model_.replace_config(std::move(*config), std::move(p));
+        if (on_config_replaced_) {
+            on_config_replaced_(model_.config());
+        }
         recompute();
         respond(id, Response::success(status()));
         return;
@@ -476,6 +482,7 @@ int run_daemon(const RunOptions &opts) {
         return 1;
     }
     const std::string first = config->profiles.front().name;
+    const Config config_for_sources = *config; // the model takes the original
     std::vector<std::string> warnings;
     Palette palette;
     if (auto p = Palette::load(config->theme.dir)) {
@@ -516,7 +523,30 @@ int run_daemon(const RunOptions &opts) {
         }
         d.stop();
     });
-    // Event sources (Hyprland, theme, hwmon, system D-Bus) attach here when opts.with_sources.
+
+    // Event sources run on the loop thread and feed handle_event directly.
+    std::optional<HyprlandSource> hyprland;
+    std::optional<ThemeWatcher> theme;
+    std::optional<std::filesystem::path> theme_dir;
+    std::optional<HwmonPoller> hwmon;
+    const auto emit = [&d](const Event &e) { d.handle_event(e); };
+    const auto sync_sources = [&](const Config &c) {
+        if (theme_dir != c.theme.dir) {
+            theme.reset();
+            theme.emplace(d.loop(), c.theme.dir, emit);
+            theme_dir = c.theme.dir;
+        }
+        if (c.needs_cpu_temp() && !hwmon) {
+            hwmon.emplace(d.loop(), opts.sys_root, emit); // only while a rule needs it
+        } else if (!c.needs_cpu_temp()) {
+            hwmon.reset();
+        }
+    };
+    if (opts.with_sources) {
+        hyprland.emplace(d.loop(), socket2_path, emit);
+        sync_sources(config_for_sources);
+        d.on_config_replaced(sync_sources);
+    }
     return d.run();
 }
 
