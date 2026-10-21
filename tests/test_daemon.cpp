@@ -71,6 +71,9 @@ class DaemonTest : public ::testing::Test {
                         .with_sources = false};
         daemon_ = std::make_unique<Daemon>(std::move(model), std::move(backend), std::move(*listen),
                                            std::move(opts));
+        if (before_run_) {
+            before_run_(*daemon_);
+        }
         thread_ = std::thread([this] { rc_ = daemon_->run(); });
         ASSERT_TRUE(wait_until([this] { return !zone_writes().empty(); }, 2000ms));
     }
@@ -117,6 +120,8 @@ class DaemonTest : public ::testing::Test {
     std::unique_ptr<Daemon> daemon_;
     std::thread thread_;
     std::atomic<int> rc_{-1};
+    /// Runs on the test thread before the daemon thread starts.
+    std::function<void(Daemon &)> before_run_;
 };
 
 } // namespace
@@ -248,6 +253,28 @@ TEST_F(DaemonTest, BadReloadKeepsPreviousConfig) {
     EXPECT_FALSE(r.ok);
     EXPECT_NE(r.error.value_or("").find("config.toml"), std::string::npos) << r.error.value_or("");
     EXPECT_EQ(status().profile, "plain");
+}
+
+// Not in the Rust suite: sources (hwmon, theme watcher) are rebuilt from the reloaded config.
+TEST_F(DaemonTest, ReloadNotifiesConfigListenersOnlyOnSuccess) {
+    std::atomic<int> calls{0};
+    std::atomic<bool> needs_temp{false};
+    before_run_ = [&](Daemon &d) {
+        d.on_config_replaced([&](const Config &c) {
+            needs_temp = c.needs_cpu_temp();
+            ++calls;
+        });
+    };
+    start(kStaticCfg);
+    write_file(config_path(), "[[profiles]\nthis is not toml");
+    EXPECT_FALSE(req(req::Reload{}).ok);
+    EXPECT_EQ(calls.load(), 0) << "a failed reload changes nothing";
+    write_file(config_path(), std::string(kStaticCfg) +
+                                  "\n[[rules]]\nname = 'hot'\nwhen = { cpu_temp_above = 90 }\n"
+                                  "brightness_cap = 10\n");
+    EXPECT_TRUE(req(req::Reload{}).ok);
+    EXPECT_EQ(calls.load(), 1);
+    EXPECT_TRUE(needs_temp.load());
 }
 
 TEST_F(DaemonTest, HintClearsAfterTimeout) {

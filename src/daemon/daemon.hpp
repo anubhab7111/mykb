@@ -4,6 +4,7 @@
 
 #include "backend/backend.hpp"
 #include "daemon/event_loop.hpp"
+#include "daemon/events.hpp"
 #include "daemon/model.hpp"
 #include "daemon/writer.hpp"
 #include "ipc/socket.hpp"
@@ -20,24 +21,6 @@
 #include <vector>
 
 namespace omenkbd {
-
-/// Something that happened outside the daemon (system D-Bus, Hyprland, theme switch, …).
-namespace event {
-/// logind `PrepareForSleep`: `entering` before suspend, `!entering` after resume.
-struct Sleep {
-    bool entering;
-};
-struct Submap {
-    std::optional<std::string> name;
-};
-struct ThemeChanged {};
-struct HwBacklight {
-    bool on;
-};
-} // namespace event
-
-using Event =
-    std::variant<FactUpdate, event::Sleep, event::Submap, event::ThemeChanged, event::HwBacklight>;
 
 struct RunOptions {
     BackendKind backend = BackendKind::Auto;
@@ -59,6 +42,11 @@ class Daemon {
 
     /// For extra watches (signalfd, event sources) before run().
     EventLoop &loop() { return loop_; }
+    /// Called on the loop thread after a successful `reload` with the new config, so event
+    /// sources that depend on it (theme dir, hwmon) can be rebuilt.
+    void on_config_replaced(std::function<void(const Config &)> fn) {
+        on_config_replaced_ = std::move(fn);
+    }
     /// Loop thread only.
     void handle_event(const Event &ev);
     /// Thread-safe.
@@ -132,6 +120,7 @@ class Daemon {
     std::optional<TimePoint> next_probe_;
     std::optional<EventLoop::TimerId> wake_timer_;
     std::optional<TimePoint> wake_at_;
+    std::function<void(const Config &)> on_config_replaced_;
 };
 
 /// Loads config, palette and state, opens the backend, binds the socket, turns SIGTERM/SIGINT
