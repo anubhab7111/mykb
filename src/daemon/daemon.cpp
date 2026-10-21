@@ -3,6 +3,7 @@
 #include "backend/mock.hpp"
 #include "sources/hwmon.hpp"
 #include "sources/hyprland.hpp"
+#include "sources/system_dbus.hpp"
 #include "sources/theme.hpp"
 
 #include <algorithm>
@@ -529,6 +530,7 @@ int run_daemon(const RunOptions &opts) {
     std::optional<ThemeWatcher> theme;
     std::optional<std::filesystem::path> theme_dir;
     std::optional<HwmonPoller> hwmon;
+    std::optional<SystemDbusSource> system;
     const auto emit = [&d](const Event &e) { d.handle_event(e); };
     const auto sync_sources = [&](const Config &c) {
         if (theme_dir != c.theme.dir) {
@@ -544,6 +546,7 @@ int run_daemon(const RunOptions &opts) {
     };
     if (opts.with_sources) {
         hyprland.emplace(d.loop(), socket2_path, emit);
+        system.emplace(d.loop(), emit);
         sync_sources(config_for_sources);
         d.on_config_replaced(sync_sources);
     }

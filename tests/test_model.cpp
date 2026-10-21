@@ -233,6 +233,20 @@ TEST(Model, UnknownFlagIsAnError) {
     EXPECT_TRUE(contains(e.error(), "unknown flag: turbo")) << e.error();
 }
 
+// hyprlock never sets logind's LockedHint and unlocking it sends no Unlock signal, so the lock
+// state comes from hypridle's on_lock_cmd/on_unlock_cmd: `omen-kbd flag locked on|off`.
+TEST(Model, LockedFlagGatesBacklightAndClearsHint) {
+    Model m = hex_model();
+    ASSERT_TRUE(req_(m, req::Hint{"super"}).has_value());
+    EXPECT_EQ(req_(m, req::Flag{"locked", true}), Change::Output);
+    Inputs i = in(m);
+    EXPECT_FALSE(i.backlight) << "on_lock = off";
+    EXPECT_EQ(i.hint, std::nullopt) << "locking clears the hint";
+    EXPECT_TRUE(m.status(nullptr).facts.locked);
+    EXPECT_EQ(req_(m, req::Flag{"locked", false}), Change::Output);
+    EXPECT_TRUE(in(m).backlight);
+}
+
 TEST(Model, BrightnessCapFromRule) {
     Model m = hex_model();
     m.apply_fact(fact::PowerProfile{"power-saver"});
