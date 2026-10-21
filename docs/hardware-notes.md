@@ -31,10 +31,17 @@ Facts recorded on the real machine, for the hardware validation phase (P4) and l
    `pacman -Qkk linux` → 7749 files, 0 altered; no hp_wmi blacklist or omen autoload; initramfs contains no
    hp-wmi/omen module.
 
-## Pending observations (P1 step 6–7, after the reboot)
+## Post-reboot observations (P1 steps 6–7, boot at 2026-10-21 21:38)
 
-- [ ] Loaded `hp_wmi` srcversion is `77ED9FA76598B1B3063E5E0`; `lsmod` shows no omen modules.
-- [ ] Hotkeys work; `/sys/firmware/acpi/platform_profile_choices` still lists profiles (was `cool quiet balanced performance`).
-- [ ] Colors shown **before login** after this reboot (nothing writes colors any more): ______
-- [ ] Colors shown before login after a later **full power-off**: ______
-- [ ] Fn backlight key: does stock hp-wmi emit any input event (`libinput debug-events` / `wev`)? ______
+- [x] Loaded `hp_wmi` srcversion is `77ED9FA76598B1B3063E5E0` (stock); `lsmod` shows only `hp_wmi`,
+      `hp_bioscfg`, `wmi` — no omen modules; `/sys/devices/platform/hp-omen-extra` gone.
+- [x] `platform_profile` = `performance`, choices still `cool quiet balanced performance`; kernel log has
+      only `hp_wmi: Registered as platform profile handler`; hotkeys and power-profile switching work
+      (user-confirmed).
+- [x] Colors shown **before login** after this warm reboot, with nothing writing colors: **the last colors**
+      (turquoise L/M/R, blue WASD). The firmware retains colors across a warm reboot; the EC may stay
+      powered during a warm reboot, so this does not yet prove non-volatile storage.
+- [ ] Colors shown before login after a **full power-off**: not yet tested (do it before P4, or as P4 step 6).
+- [ ] Fn backlight key: does stock hp-wmi emit any input event (`libinput debug-events` / `wev`)? Not yet
+      tested → the daemon uses the designed fallback (probe `backlight` every 3 s only while an effect is
+      wanted).
