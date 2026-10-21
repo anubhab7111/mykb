@@ -56,7 +56,8 @@ local MODS = { [133]="super", [134]="super", [37]="ctrl", [105]="ctrl",
 local ORDER = { "super", "ctrl", "alt", "shift" }
 local WANTED = { ["super"]=true, ["super+shift"]=true, ["ctrl"]=true }
 local DELAY_MS = 250
-local held, sent, pending = {}, false, nil
+local RAW_LIMIT = 5   -- raw keycodes are logged for the first 5 presses only (check 1), then never
+local held, sent, pending, raw_left = {}, false, nil, RAW_LIMIT
 local function log(msg) hl.exec_cmd("logger -t omen-kbd-spike '" .. msg .. "'") end
 local function current_set()
   local present, parts = {}, {}
@@ -69,7 +70,10 @@ local timer = hl.timer(function()
 end, { timeout = DELAY_MS, type = "oneshot" })
 timer:set_enabled(false)
 hl.on("input.keyboard.key", function(keycode, _time, state)
-  if state == 1 then log("raw press " .. keycode) end
+  if state == 1 and raw_left > 0 then
+    raw_left = raw_left - 1
+    log("raw press " .. keycode .. (raw_left == 0 and " (raw logging now off)" or ""))
+  end
   if MODS[keycode] == nil or state == 2 then return end
   if state == 1 then held[keycode] = true else held[keycode] = nil end
   local set = current_set()
@@ -87,15 +91,16 @@ log("spike loaded")
 
 - [ ] **Step 2: Syntax check.** Run: `luac -p spikes/kbdlight-spike.lua` → no output.
 - [ ] **Step 3: Load it live (ask the user first; undone by `hyprctl reload`).** Run: `hyprctl eval "dofile('$PWD/spikes/kbdlight-spike.lua')"` and in another terminal `journalctl -t omen-kbd-spike -f`. Expected: `spike loaded`.
-- [ ] **Step 4: User performs the checks; record each result (pass/fail + log excerpt) in `spikes/RESULTS.md`:**
-  1. Press Super_L once → `raw press 133` (confirms XKB codes).
+- [ ] **Step 4: User performs the checks; record each result (pass/fail + log excerpt) in `spikes/RESULTS.md`.**
+  **Privacy rule:** raw keycodes are logged only for the first 5 presses after loading, and those 5 presses must be the modifier keys below. After that, only modifier-set lines (`hint …`) are ever logged; no other key is recorded. Still, never type anything sensitive while the spike is loaded except at check 8, and only after the log shows `(raw logging now off)`.
+  1. Right after loading, press exactly these 5 keys once each, nothing else: Super_L, Super_R, Shift_L, Ctrl_L, Alt_L → `raw press 133`, `134`, `50`, `37`, `64` (confirms XKB codes), the last line ending `(raw logging now off)`.
   2. Hold Super ≥ 0.5 s → `hint super` once; release → `hint clear`.
   3. Super+Q quick chord → no `hint` line.
   4. Hold Super, add Shift → `hint super+shift` without an intermediate `hint clear`; release both → `hint clear`.
   5. Type `Hello` (Shift+h) → no `hint` line.
   6. Hold Super, switch workspace (Super+2), keep holding → hint stays; release → clear.
   7. Re-arming: tap Super twice within 250 ms then hold → exactly one `hint super` (confirms `set_enabled(true)` restarts the oneshot; if not, use `timer:set_timeout(DELAY_MS)` before enabling and re-test).
-  8. Lock (`loginctl lock-session`) while holding Super, unlock → note whether a clear arrived (daemon expiry covers it if not).
+  8. Lock (`loginctl lock-session`) while holding Super, unlock with your password → note whether a clear arrived (daemon expiry covers it if not). Confirm in the journal that no line other than `hint …` appeared during unlock.
 - [ ] **Step 5: Unload.** Run: `hyprctl reload`. Expected: no further spike log lines on key presses.
 - [ ] **Step 6: Decide.** If checks 2–5 pass, Task 17 emits this algorithm. If the event does not fire for modifiers, record it and Task 17 emits the fallback (bare-modkey binds with `{ non_consuming = true }` press and `{ release = true }` release, per spec).
 - [ ] **Step 7: Commit.** `git add spikes && git commit -m "spike: Hyprland Lua modifier hook for mode colors"`
@@ -632,8 +637,7 @@ Loop behavior (pinned):
   - Session: `Manager.GetUser(getuid())` → `org.freedesktop.login1.User` property `Display` → session object path (the daemon runs under `user@.service`, so `GetSessionByPID` would fail); signals `Lock`/`Unlock` ⇒ `Fact(Locked(true/false))`; property `LockedHint` changes ⇒ `Fact(Locked(v))`.
 
 - [ ] **Step 1: Implement** (thin glue; no unit tests beyond compile — the mapping is one line per property).
-- [ ] **Step 2: Read-only live check.** Run `RUST_LOG=info omen-kbd daemon --backend mock` (after Task 16) and `omen-kbd status --json | jq .facts`. Expected: `power_profile` equals `busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles net.hadess.PowerProfiles ActiveProfile`; `on_battery` and `battery_pct` match `upower -i /org/freedesktop/UPower/devices/DisplayDevice`. (Optional, user-assisted: switch the profile from the rice menu and watch `facts.power_profile` change.)
-- [ ] **Step 3: Commit** `feat(sources): system D-Bus facts and sleep/lock signals`.
+- [ ] **Step 2: Commit** `feat(sources): system D-Bus facts and sleep/lock signals`. (The live check against the real bus runs in Task 16 Step 5, once the CLI exists.)
 
 ---
 
@@ -653,6 +657,7 @@ Exit codes: 0 ok; 1 `Response.ok == false` (prints `omen-kbd: <error>` to stderr
 - [ ] **Step 1: Failing tests:** `brightness_accepts_negative_delta` (`Cli::try_parse_from(["omen-kbd","brightness","-10"])` ⇒ Brightness `"-10"`), `set_requires_one_or_four_colors` (2 colors ⇒ parse error), `waybar_on_off_hint_error` (four `Status` fixtures ⇒ expected `text`/`class`/`percentage`), `format_status_has_pinned_labels`.
 - [ ] **Step 2–4:** FAIL → implement → PASS.
 - [ ] **Step 5: Smoke run** (mock, no hardware): `cargo run -- daemon --backend mock --mock-render --no-sources &`; then `cargo run -- set '#ff0000'` (exit 0, mock logs a write), `cargo run -- effect wave` (exit 1, message mentions `enabled = true`), `cargo run -- status`; stop the daemon; `cargo run -- status` ⇒ exit 2.
+  Then the read-only D-Bus check for Task 15: `RUST_LOG=info cargo run -- daemon --backend mock &` (sources on) and `cargo run -- status --json | jq .facts`. Expected: `power_profile` equals `busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles net.hadess.PowerProfiles ActiveProfile`; `on_battery`/`battery_pct` match `upower -i /org/freedesktop/UPower/devices/DisplayDevice`. (Optional, user-assisted: switch the profile from the rice menu and watch `facts.power_profile` change.) Stop the daemon.
 - [ ] **Step 6: Commit** `feat(cli): commands, status and waybar stream`.
 
 ---
@@ -664,13 +669,13 @@ Exit codes: 0 ok; 1 `Response.ok == false` (prints `omen-kbd: <error>` to stderr
 **Interfaces:**
 - Consumes: `Config`, `Palette::load`, `ipc::request`, `spikes/RESULTS.md` (Task 1 decision).
 - Produces:
-  `pub fn gen_hyprland(cfg: &Config) -> String` — the Task 1 algorithm with `logger` replaced by `hl.exec_cmd("omen-kbd hint " .. pending)` / `hl.exec_cmd("omen-kbd hint clear")`, `WANTED` generated from `cfg.hints.modifiers` keys (sorted), `DELAY_MS = cfg.hints.delay_ms`, raw-press logging removed, header `-- generated by omen-kbd gen-hyprland: save as ~/.config/hypr/modules/kbdlight.lua and require it from hyprland.lua`. (If Task 1 chose the fallback, emit the bare-modkey bind version instead.)
+  `pub fn gen_hyprland(cfg: &Config) -> String` — the Task 1 algorithm with `logger` replaced by `hl.exec_cmd("omen-kbd hint " .. pending)` / `hl.exec_cmd("omen-kbd hint clear")`, `WANTED` generated from `cfg.hints.modifiers` keys (sorted), `DELAY_MS = cfg.hints.delay_ms`, all raw-press logging (`RAW_LIMIT`, `raw_left`, `log`) removed, header `-- generated by omen-kbd gen-hyprland: save as ~/.config/hypr/modules/kbdlight.lua and require it from hyprland.lua`. (If Task 1 chose the fallback, emit the bare-modkey bind version instead.)
   `pub enum Level { Ok, Warn, Fail }` · `pub struct Check { pub level: Level, pub msg: String }` · `pub struct DoctorEnv { pub sys_root: PathBuf, pub proc_root: PathBuf, pub dkms_root: PathBuf, pub hypr_dir: PathBuf, pub theme_dir: PathBuf, pub socket: PathBuf }` (`Default` = real paths: `/sys`, `/proc`, `/var/lib/dkms`, `~/.config/hypr`, config theme dir, `socket_path()`)
   `pub async fn run_checks(env: &DoctorEnv) -> Vec<Check>`; CLI prints `OK|WARN|FAIL  msg` per line, exit 1 if any Fail.
   Checks (pinned): (1) backend presence via the same rules as `open(Auto)`; for hp-omen-kbd also report `readonly=` from `info` (Warn if `1`); both present ⇒ Fail. (2) writability of `zones` (or each `multi_intensity`) via `libc::access(W_OK)` ⇒ Fail `not writable: sudo usermod -aG omen-kbd $USER, then log in again`. (3) competing writers: `/proc/modules` has `hp_omen_extra` or `omen_rgb_keyboard` ⇒ Fail; a `/proc/*/comm` equal to `omen-space-daem` (15-char truncation) ⇒ Fail; `openrgb` ⇒ Warn; `<sys_root>/devices/platform/hp-wmi/rgb_zones` exists ⇒ Warn. (4) DKMS: any `<dkms_root>/*/*/source/dkms.conf` with `BUILT_MODULE_NAME[n]="hp-wmi"` or `hp_wmi` ⇒ Warn naming `pkg/version`. (5) daemon: `Status` request ⇒ Ok, plus Warn for `budget_exhausted` / `last_error`; unreachable ⇒ Warn. (6) hook: some file under `hypr_dir` contains `omen-kbd hint` ⇒ Ok, else Warn `mode-colors hook not installed (omen-kbd gen-hyprland)`. (7) theme: `Palette::load(theme_dir)` non-empty ⇒ Ok, else Warn.
 
 - [ ] **Step 1: Failing tests:** `generated_lua_lists_configured_sets` (contains `["super+shift"] = true`, `timeout = 250`, `omen-kbd hint `), `generated_lua_compiles` (pipe to `luac -p -`; skip with a message if `luac` is absent), `doctor_flags_competing_drivers` (fake `proc_root/modules` with `hp_omen_extra 20480 0 - Live 0x0` ⇒ a Fail), `doctor_flags_hpwmi_dkms` (fake `dkms_root/hp-omen-extra/2.1.2/source/dkms.conf` with `BUILT_MODULE_NAME[0]="hp-wmi"` ⇒ Warn containing `hp-omen-extra/2.1.2`), `doctor_both_backends_fail`, `doctor_hook_detected`.
-- [ ] **Step 2–4:** FAIL → implement → PASS. **Step 5: Real read-only run:** `cargo run -- doctor` on this laptop. Expected today: Fail for missing backend and for `hp_omen_extra`/omen-space (until P1 migration), Warn for the hp-wmi DKMS package — i.e. it reports the current mess accurately. **Step 6: Commit** `feat: gen-hyprland and doctor`.
+- [ ] **Step 2–4:** FAIL → implement → PASS. **Step 5: Real read-only run:** `cargo run -- doctor` on this laptop. Expected: it reports the installed state accurately — after the P1 migration that means no competing writers and no hp-wmi DKMS package, and a Fail for the missing backend (the kernel module comes in the next plan). **Step 6: Commit** `feat: gen-hyprland and doctor`.
 
 ---
 
