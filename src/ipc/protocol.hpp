@@ -104,6 +104,9 @@ struct Response {
 std::string encode(const Request &r);
 std::expected<Request, std::string> decode_request(std::string_view line);
 std::string encode(const Response &r);
+/// The status object alone (as in a response's `status`), e.g. for `status --json`; `indent` as
+/// in nlohmann::json::dump (-1 = one line).
+std::string encode_status(const Status &s, int indent = -1);
 std::expected<Response, std::string> decode_response(std::string_view line);
 
 } // namespace omenkbd
