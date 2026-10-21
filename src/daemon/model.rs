@@ -90,6 +90,10 @@ impl Model {
         &self.persisted
     }
 
+    pub fn palette(&self) -> &Palette {
+        &self.palette
+    }
+
     /// Applies a request. Status/Subscribe/Reload are handled by the run loop (`Change::None`).
     pub fn handle(&mut self, req: &Request, now: Instant) -> Result<Change, String> {
         match req {
