@@ -168,6 +168,10 @@ std::expected<Change, std::string> Model::handle(const Request &r, TimePoint now
             facts_.gamemode = f->on;
             return Change::Output;
         }
+        if (f->name == "locked") { // from hypridle's on_lock_cmd / on_unlock_cmd
+            apply_fact(fact::Locked{f->on});
+            return Change::Output;
+        }
         return R(std::unexpect, std::format("unknown flag: {}", f->name));
     }
     return Change::None;

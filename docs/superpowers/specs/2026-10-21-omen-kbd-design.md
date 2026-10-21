@@ -333,6 +333,12 @@ polling (the power-profiles service here is `tlp-pd`, which implements the same
 existing keyboard listener in `hypridle.conf` (currently `brightnessctl -sd rgb:kbd_backlight …`, a device
 that doesn't exist) is **replaced** by `on-timeout = omen-kbd idle on` / `on-resume = omen-kbd idle off`,
 keeping its timeout and `condition_cmd`.
+**Lock** (revised 2026-10-22, C++ Task 15): logind's session `Lock` signal is only a *request* to lock;
+on this system hyprlock 0.9.6 never sets `LockedHint` and unlocking it emits no `Unlock`, so mapping
+`Lock` ⇒ locked would leave the keyboard off after every unlock. The lock state therefore comes from
+hypridle 0.1.8's `on_lock_cmd = omen-kbd flag locked on` / `on_unlock_cmd = omen-kbd flag locked off`
+(fired when a session lock is actually taken/released, however it was started); logind `LockedHint` and
+`Unlock` are still followed, `Lock` is not.
 **Gamemode**: the rice's `rice.gamemode.toggle()` calls `omen-kbd flag gamemode on|off`. hwmon CPU
 package temp polled every 2 s **only** if a temperature rule exists. Fn-key state: if P1 step 7 shows
 stock hp-wmi emits an input event for the Fn backlight key, listen to that; otherwise module `backlight`
