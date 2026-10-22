@@ -208,7 +208,14 @@ int run_gen_hyprland() {
         std::println(stderr, "omen-kbd: {}", cfg.error());
         return kExitError;
     }
-    std::print("{}", gen_hyprland(*cfg));
+    std::error_code ec;
+    const auto exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    const auto command = hook_command(ec ? std::filesystem::path() : exe);
+    if (command == "omen-kbd") {
+        std::println(stderr, "omen-kbd: the hook calls `omen-kbd` by name, so it must be on "
+                             "Hyprland's PATH (the binary's own path cannot be used in a hook)");
+    }
+    std::print("{}", gen_hyprland(*cfg, command));
     return 0;
 }
 
