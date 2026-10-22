@@ -195,7 +195,7 @@ std::expected<std::optional<Status>, IpcError> Subscription::next_status() {
         return std::unexpected(IpcError{IpcError::Kind::Protocol, resp.error()});
     }
     if (resp->status) {
-        return std::optional<Status>(std::move(*resp->status));
+        return std::move(resp->status);
     }
     return std::unexpected(IpcError{IpcError::Kind::Protocol,
                                     resp->error.value_or("subscription message without status")});

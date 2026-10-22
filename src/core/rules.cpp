@@ -18,7 +18,7 @@ std::expected<void, std::string> take(std::expected<std::optional<T>, std::strin
         return std::unexpected(v.error());
     }
     if (*v) {
-        out = **v;
+        out = **v; // NOLINT(bugprone-optional-value-conversion): Out is T or std::optional<T>
     }
     return {};
 }

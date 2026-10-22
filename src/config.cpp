@@ -424,7 +424,7 @@ std::expected<std::string, std::string> normalize_mods(std::string_view s) {
 
 std::filesystem::path expand_home(std::string_view p) {
     const char *home_env = std::getenv("HOME");
-    const std::filesystem::path home = home_env != nullptr ? home_env : "";
+    std::filesystem::path home = home_env != nullptr ? home_env : "";
     if (p == "~") {
         return home;
     }

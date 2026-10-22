@@ -57,7 +57,7 @@ class MockBackend final : public Backend {
                 line += std::format("  hw{} \x1b[48;2;{};{};{}m   \x1b[0m #{}", i, hw[i].r, hw[i].g,
                                     hw[i].b, hw[i].to_hex());
             }
-            std::cout << line << std::endl;
+            std::cout << line << '\n' << std::flush; // live frames, also when piped to a log
         }
         return {};
     }
@@ -72,7 +72,7 @@ class MockBackend final : public Backend {
             s_->hw_backlight = on;
         }
         if (render_) {
-            std::cout << "mock: backlight " << (on ? "on" : "off") << std::endl;
+            std::cout << "mock: backlight " << (on ? "on" : "off") << '\n' << std::flush;
         }
         return {};
     }

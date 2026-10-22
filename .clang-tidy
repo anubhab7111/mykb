@@ -1,0 +1,20 @@
+# run-clang-tidy -p build src
+# Turned off as noise for this codebase:
+#   modernize-use-designated-initializers  brace-init of small structs is the house style;
+#                                          -Wmissing-field-initializers catches partial ones
+#   performance-enum-size                  a byte per enum value buys nothing here
+#   modernize-use-scoped-lock              std::lock_guard on a single mutex is fine
+#   bugprone-easily-swappable-parameters   flags too many ordinary signatures
+#   modernize-use-std-print                fprintf is deliberate where nothing may throw
+Checks: >
+  bugprone-*,
+  performance-*,
+  modernize-use-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-designated-initializers,
+  -performance-enum-size,
+  -modernize-use-scoped-lock,
+  -bugprone-easily-swappable-parameters,
+  -modernize-use-std-print
+HeaderFilterRegex: '.*/src/.*'
+FormatStyle: file

@@ -22,14 +22,15 @@ constexpr const char *kUPower = "org.freedesktop.UPower";
 constexpr const char *kUPowerDevice = "org.freedesktop.UPower.Device";
 constexpr const char *kProfiles = "net.hadess.PowerProfiles";
 
-/// Runs a handler; nothing may unwind through sd-bus's C frames.
+/// Runs a handler; nothing may unwind through sd-bus's C frames. The warnings use fprintf because
+/// std::println throws when stderr cannot be written, and a throw here would terminate.
 template <typename F> void guarded(F &&f) noexcept {
     try {
         f();
     } catch (const std::exception &e) {
-        std::println(stderr, "omen-kbd: warning: D-Bus handler: {}", e.what());
+        std::fprintf(stderr, "omen-kbd: warning: D-Bus handler: %s\n", e.what());
     } catch (...) {
-        std::println(stderr, "omen-kbd: warning: D-Bus handler failed");
+        std::fprintf(stderr, "omen-kbd: warning: D-Bus handler failed\n");
     }
 }
 
@@ -233,12 +234,14 @@ void SystemDbusSource::sync_poll() {
         return;
     }
     std::uint32_t events = 0;
+    // NOLINTBEGIN(bugprone-signed-bitwise): poll(2) flags are small positive int constants
     if ((pd.events & POLLIN) != 0) {
         events |= EPOLLIN;
     }
     if ((pd.events & POLLOUT) != 0) {
         events |= EPOLLOUT;
     }
+    // NOLINTEND(bugprone-signed-bitwise)
     const auto on_ready = [this](std::uint32_t ev) {
         if ((ev & (EPOLLHUP | EPOLLERR)) != 0) {
             shutdown("connection closed");
