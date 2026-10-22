@@ -88,6 +88,11 @@ TEST(Cli, CommandsMapToRequests) {
     const auto [daemon, err] = parse({"daemon", "--backend", "mock", "--no-sources"});
     EXPECT_FALSE(daemon.has_value()) << "not a request";
     EXPECT_EQ(err, "");
+    for (const char *local : {"doctor", "gen-hyprland"}) {
+        const auto [r, e] = parse({local});
+        EXPECT_FALSE(r.has_value()) << local << " is not a request";
+        EXPECT_EQ(e, "") << local;
+    }
     EXPECT_FALSE(parse({"explode"}).first.has_value());
 }
 

@@ -1,6 +1,8 @@
 #include "cli/cli.hpp"
 
+#include "cli/doctor.hpp"
 #include "cli/format.hpp"
+#include "cli/gen_hyprland.hpp"
 #include "config.hpp"
 #include "daemon/daemon.hpp"
 #include "ipc/socket.hpp"
@@ -10,6 +12,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <print>
 #include <thread>
@@ -26,7 +29,7 @@ constexpr int kExitUsage = 64; // EX_USAGE; 2 already means "daemon not running"
 
 /// What the command line asked for. Positionals are shared: only one subcommand runs.
 struct Args {
-    enum class Mode { None, Request, Waybar, Daemon };
+    enum class Mode { None, Request, Waybar, Daemon, Doctor, GenHyprland };
     Mode mode = Mode::None;
     std::optional<Request> request;
     bool json = false;
@@ -113,6 +116,11 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
         x.mode = Args::Mode::Waybar;
     });
 
+    app->add_subcommand("doctor", "Check the driver, permissions, competing writers and hooks")
+        ->callback([&x] { x.mode = Args::Mode::Doctor; });
+    app->add_subcommand("gen-hyprland", "Print the Hyprland Lua module for mode colors")
+        ->callback([&x] { x.mode = Args::Mode::GenHyprland; });
+
     auto *daemon = app->add_subcommand("daemon", "Run the daemon");
     daemon->add_option("--backend", x.backend, "auto, mock, hp-omen-kbd or mainline-led")
         ->check(CLI::IsMember({"auto", "mock", "hp-omen-kbd", "mainline-led"}));
@@ -194,6 +202,42 @@ int run_daemon_cmd(const Args &x) {
     return run_daemon(o);
 }
 
+int run_gen_hyprland() {
+    const auto cfg = load_config(config_path());
+    if (!cfg) {
+        std::println(stderr, "omen-kbd: {}", cfg.error());
+        return kExitError;
+    }
+    std::print("{}", gen_hyprland(*cfg));
+    return 0;
+}
+
+/// Prints `OK|WARN|FAIL  message` per check; exit 1 if anything failed. A broken config is a
+/// failure of its own; the remaining checks then use the built-in defaults.
+int run_doctor() {
+    std::vector<Check> checks;
+    const auto path = config_path();
+    auto cfg = load_config(path);
+    std::error_code ec;
+    if (!cfg) {
+        checks.push_back({Level::Fail, cfg.error()});
+    } else if (std::filesystem::exists(path, ec)) {
+        checks.push_back({Level::Ok, "config " + path.string()});
+    } else {
+        checks.push_back(
+            {Level::Ok, "no config file; using built-in defaults (" + path.string() + ")"});
+    }
+    const Config used = cfg ? std::move(*cfg) : embedded_default();
+    std::ranges::move(run_checks(DoctorEnv::real(used)), std::back_inserter(checks));
+
+    bool failed = false;
+    for (const auto &c : checks) {
+        std::println("{:<4}  {}", level_name(c.level), c.msg);
+        failed = failed || c.level == Level::Fail;
+    }
+    return failed ? kExitError : 0;
+}
+
 } // namespace
 
 std::optional<Request> parse_args_to_request(int argc, const char *const *argv,
@@ -230,6 +274,10 @@ int cli_main(int argc, char **argv) {
         return run_waybar();
     case Args::Mode::Daemon:
         return run_daemon_cmd(x);
+    case Args::Mode::Doctor:
+        return run_doctor();
+    case Args::Mode::GenHyprland:
+        return run_gen_hyprland();
     case Args::Mode::None:
         break;
     }
