@@ -1,0 +1,3 @@
+# The repository's C++ checks (../.clang-tidy) do not apply to kernel C:
+# its gates are checkpatch.pl --strict and the kbuild W=1 build.
+Checks: '-*'
