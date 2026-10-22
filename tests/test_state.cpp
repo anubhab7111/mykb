@@ -49,6 +49,18 @@ TEST(State, SaveRoundtripsAndLeavesNoTmp) {
         << "same JSON shape as the Rust prototype";
 }
 
+// save() runs in a daemon timer and must never throw, whatever the strings hold (today they come
+// only through parsers that reject invalid UTF-8; see Ipc.DecodingRejectsIllFormedUtf8).
+TEST(State, SaveReplacesInvalidUtf8) {
+    TempDir d;
+    const auto p = d.path() / "state.json";
+    PersistedState s = PersistedState::default_for("caf\xe9");
+    ASSERT_TRUE(s.save(p).has_value());
+    const auto [loaded, warning] = PersistedState::load(p, "default");
+    EXPECT_EQ(warning, std::nullopt);
+    EXPECT_EQ(loaded.active_profile, "caf\xef\xbf\xbd");
+}
+
 TEST(State, UnknownAndMissingFieldsAreTolerated) {
     TempDir d;
     const auto p = d.path() / "state.json";
