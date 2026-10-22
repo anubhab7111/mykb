@@ -137,3 +137,143 @@ int hok_format_info(char *buf, size_t size, const struct hok_info *info)
 		return -EINVAL;
 	return n;
 }
+
+static void put_le32(u8 *p, u32 v)
+{
+	p[0] = (u8)v;
+	p[1] = (u8)(v >> 8);
+	p[2] = (u8)(v >> 16);
+	p[3] = (u8)(v >> 24);
+}
+
+static u32 get_le32(const u8 *p)
+{
+	return (u32)p[0] | (u32)p[1] << 8 | (u32)p[2] << 16 | (u32)p[3] << 24;
+}
+
+size_t hok_build_args(u8 dst[HOK_ARGS_SIZE], u32 command, u32 query,
+		      const u8 *data, u32 datasize)
+{
+	if (datasize > HOK_TABLE_SIZE)
+		datasize = HOK_TABLE_SIZE;
+	memset(dst, 0, HOK_ARGS_SIZE);
+	put_le32(dst, HOK_SIGNATURE);
+	put_le32(dst + 4, command);
+	put_le32(dst + 8, query);
+	put_le32(dst + 12, datasize);
+	if (data && datasize)
+		memcpy(dst + 16, data, datasize);
+	return HOK_ARGS_SIZE;
+}
+
+/* The BIOS picks its method by the size of the reply it is asked for. */
+int hok_method_id(size_t outsize)
+{
+	if (outsize > 4096)
+		return -EINVAL;
+	if (outsize > 1024)
+		return 5;
+	if (outsize > 128)
+		return 4;
+	if (outsize > 4)
+		return 3;
+	if (outsize > 0)
+		return 2;
+	return 1;
+}
+
+int hok_bios_errno(u32 code)
+{
+	if (code == 0)
+		return 0;
+	if (code == 3 || code == 4)	/* unknown command / command type */
+		return -EOPNOTSUPP;
+	return -EIO;
+}
+
+int hok_parse_reply(const u8 *reply, size_t len, u8 *out, size_t outsize)
+{
+	u32 code;
+
+	if (len < HOK_REPLY_HEADER)
+		return -EIO;
+	code = get_le32(reply + 4);
+	if (code)
+		return hok_bios_errno(code);
+	if (len - HOK_REPLY_HEADER < outsize)
+		return -EIO;
+	if (outsize)
+		memcpy(out, reply + HOK_REPLY_HEADER, outsize);
+	return 0;
+}
+
+bool hok_backlight_on(u8 raw)
+{
+	return (raw & 0x80) != 0;
+}
+
+bool hok_kbd_type_supported(u8 type)
+{
+	return type == 1 || type == 2;	/* four-zone, with or without numpad */
+}
+
+unsigned int hok_clamp_interval(unsigned int ms)
+{
+	if (ms < HOK_INTERVAL_MIN_MS)
+		return HOK_INTERVAL_MIN_MS;
+	if (ms > HOK_INTERVAL_MAX_MS)
+		return HOK_INTERVAL_MAX_MS;
+	return ms;
+}
+
+u64 hok_wait_ms(bool written, s64 last_ms, s64 now_ms, unsigned int interval_ms)
+{
+	s64 elapsed;
+
+	if (!written)
+		return 0;
+	elapsed = now_ms - last_ms;
+	if (elapsed < 0)
+		return interval_ms;
+	if (elapsed >= (s64)interval_ms)
+		return 0;
+	return (u64)((s64)interval_ms - elapsed);
+}
+
+static s64 budget_minute(s64 now_s)
+{
+	return now_s < 0 ? 0 : now_s / 60;
+}
+
+void hok_budget_init(struct hok_budget *b)
+{
+	memset(b, 0, sizeof(*b));
+}
+
+u32 hok_budget_used(const struct hok_budget *b, s64 now_s)
+{
+	s64 minute = budget_minute(now_s);
+	u64 sum = 0;
+	int i;
+
+	for (i = 0; i < HOK_BUDGET_SLOTS; i++)
+		if (b->minute[i] > minute - HOK_BUDGET_SLOTS)
+			sum += b->count[i];
+	return sum > 0xffffffffu ? 0xffffffffu : (u32)sum;
+}
+
+bool hok_budget_take(struct hok_budget *b, s64 now_s, u32 max_per_hour)
+{
+	s64 minute = budget_minute(now_s);
+	int slot = (int)(minute % HOK_BUDGET_SLOTS);
+
+	if (hok_budget_used(b, now_s) >= max_per_hour)
+		return false;
+	/* A stale slot starts over; one stamped later (clock went back) keeps counting. */
+	if (b->minute[slot] < minute) {
+		b->minute[slot] = minute;
+		b->count[slot] = 0;
+	}
+	b->count[slot]++;
+	return true;
+}
