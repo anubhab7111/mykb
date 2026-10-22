@@ -24,7 +24,7 @@ namespace fs = std::filesystem;
 
 constexpr std::string_view kHpOmenKbd = "devices/platform/hp-omen-kbd";
 constexpr std::array<std::string_view, 4> kLedZones{"right", "center", "left", "wasd"};
-constexpr std::uintmax_t kMaxHookFile = 1 << 20;
+constexpr std::uintmax_t kMaxHookFile = std::uintmax_t{1} << 20U;
 constexpr int kMaxHookDepth = 4;
 constexpr std::size_t kMaxHookFiles = 2000;
 

@@ -27,9 +27,9 @@ constexpr Clock::duration kSaveUserChange = 1s;
 constexpr Clock::duration kSaveCounterOnly = 60s;
 constexpr Clock::duration kAcceptRetry = 100ms;
 /// A request line is well under 1 KiB; anything this long is not a client of ours.
-constexpr std::size_t kMaxIn = 64 * 1024;
+constexpr std::size_t kMaxIn = std::size_t{64} * 1024;
 /// A subscriber this far behind is not reading; drop it rather than buffer forever.
-constexpr std::size_t kMaxOut = 1024 * 1024;
+constexpr std::size_t kMaxOut = std::size_t{1024} * 1024;
 
 void warn(std::string_view msg) { std::println(stderr, "omen-kbd: warning: {}", msg); }
 
@@ -311,7 +311,7 @@ void Daemon::on_request(std::uint64_t id, Client &c, const Request &r) {
         if (!palette) {
             model_.add_warning(palette.error());
         }
-        Palette p = palette ? std::move(*palette) : model_.palette();
+        Palette p = palette ? std::move(*palette) : Palette(model_.palette());
         model_.replace_config(std::move(*config), std::move(p));
         if (on_config_replaced_) {
             on_config_replaced_(model_.config());

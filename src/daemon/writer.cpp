@@ -54,13 +54,12 @@ void Writer::run() {
         // A probe goes first: probes are rare (every 3 s at most), while a fast effect can keep
         // the job slot full, and the probe is what lets the Fn key pause that effect.
         const bool probing = std::exchange(probe_, false);
-        std::optional<WriteJob> job;
-        if (!probing) {
-            job = std::exchange(job_, std::nullopt);
-        }
+        const std::optional<WriteJob> job =
+            probing ? std::nullopt : std::exchange(job_, std::nullopt);
         lock.unlock();
-        WriterMsg msg = probing ? WriterMsg(BacklightProbe{backend_->read_backlight()})
-                                : WriterMsg(WriteOutcome{job->generation, apply(*job)});
+        // Without a probe the wait returned for a job, so `job` is set here.
+        WriterMsg msg = job ? WriterMsg(WriteOutcome{job->generation, apply(*job)})
+                            : WriterMsg(BacklightProbe{backend_->read_backlight()});
         lock.lock();
         outbox_.push_back(std::move(msg));
         const std::uint64_t one = 1;

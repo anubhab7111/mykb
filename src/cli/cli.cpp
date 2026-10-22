@@ -276,7 +276,7 @@ int cli_main(int argc, char **argv) {
     }
     switch (x.mode) {
     case Args::Mode::Request:
-        return run_request(*x.request, x.json);
+        return x.request ? run_request(*x.request, x.json) : kExitUsage;
     case Args::Mode::Waybar:
         return run_waybar();
     case Args::Mode::Daemon:
