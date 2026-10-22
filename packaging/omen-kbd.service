@@ -1,0 +1,14 @@
+# omen-kbd user unit. Install:
+#   install -Dm644 packaging/omen-kbd.service ~/.config/systemd/user/omen-kbd.service
+#   systemctl --user daemon-reload
+# Started from Hyprland's autostart (snippets/autostart.lua), so there is no [Install]:
+# start-hyprland never activates graphical-session.target.
+
+[Unit]
+Description=omen-kbd keyboard color daemon
+After=dbus.socket
+
+[Service]
+ExecStart=%h/.local/bin/omen-kbd daemon --backend auto
+Restart=on-failure
+RestartSec=2
