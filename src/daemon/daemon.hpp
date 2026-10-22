@@ -111,7 +111,9 @@ class Daemon {
     std::uint64_t generation_ = 0;
     /// The last frame handed to the writer, as (backlight, hardware zones).
     std::optional<std::pair<bool, std::array<Rgb, 4>>> last_job_;
+    /// The next job is forced (see WriteJob), even if its frame equals the last one.
     bool force_next_ = false;
+    bool force_backlight_next_ = false;
     std::optional<Output> last_output_;
     std::optional<Status> last_status_;
     std::vector<Pending> pending_;

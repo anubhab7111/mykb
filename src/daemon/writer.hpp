@@ -24,8 +24,12 @@ struct WriteJob {
     std::uint64_t generation;
     bool backlight;
     std::array<Rgb, 4> hw;
-    /// Write the zones even if they equal the last written frame (e.g. after resume).
+    /// The firmware may have reset everything (resume): write the backlight and the zones even if
+    /// they equal what was last written; a backlight-off job leaves the zones for the next frame.
     bool force;
+    /// The backlight may have changed behind our back (the Fn key): write it even if it equals
+    /// what was last written.
+    bool force_backlight;
     friend bool operator==(const WriteJob &, const WriteJob &) = default;
 };
 
@@ -50,7 +54,7 @@ class Writer {
     Writer(const Writer &) = delete;
     Writer &operator=(const Writer &) = delete;
 
-    /// Replaces any job the thread has not taken yet.
+    /// Replaces any job the thread has not taken yet, keeping that job's force flags.
     void submit(const WriteJob &job);
     /// Asks for one backlight read (requests made while one is pending collapse into it).
     void probe();

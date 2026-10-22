@@ -21,7 +21,12 @@ Writer::~Writer() {
 void Writer::submit(const WriteJob &job) {
     {
         const std::lock_guard lock(mu_);
+        // The reason to force a write does not go away when a newer frame replaces the job.
+        const bool force = job.force || (job_ && job_->force);
+        const bool force_backlight = job.force_backlight || (job_ && job_->force_backlight);
         job_ = job;
+        job_->force = force;
+        job_->force_backlight = force_backlight;
     }
     cv_.notify_one();
 }
@@ -68,6 +73,14 @@ void Writer::run() {
 }
 
 std::expected<bool, BackendError> Writer::apply(const WriteJob &job) {
+    // Forget what the hardware is believed to show wherever it may have changed; the memory stays
+    // empty until a write succeeds, so a forced zone rewrite waits for the backlight to come on.
+    if (job.force) {
+        zones_.reset();
+    }
+    if (job.force || job.force_backlight) {
+        backlight_.reset();
+    }
     // "Off" is the firmware backlight only: the color table is never touched.
     if (!job.backlight) {
         if (backlight_ != false) {
@@ -84,7 +97,7 @@ std::expected<bool, BackendError> Writer::apply(const WriteJob &job) {
         }
         backlight_ = true;
     }
-    if (job.force || zones_ != job.hw) {
+    if (zones_ != job.hw) {
         if (auto r = backend_->write_zones(job.hw); !r) {
             return std::unexpected(r.error());
         }

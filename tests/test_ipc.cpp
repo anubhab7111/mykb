@@ -107,6 +107,32 @@ TEST(Ipc, StatusResponseRoundtrips) {
     EXPECT_EQ(err->error, "nope");
 }
 
+// Error text can quote raw bytes: nlohmann's parse errors echo the offending byte (a bad request
+// line, a corrupt state file's warning), and CLI arguments arrive in any encoding. Encoding
+// replaces invalid UTF-8 with U+FFFD; throwing would end the daemon (or abort the CLI).
+TEST(Ipc, EncodingReplacesInvalidUtf8) {
+    const std::string bad = "caf\xe9";
+    const std::string replaced = "caf\xef\xbf\xbd";
+    const auto err = decode_response(encode(Response::failure(bad)));
+    ASSERT_TRUE(err.has_value()) << err.error();
+    EXPECT_EQ(err->error, replaced);
+    EXPECT_EQ(decode_request(encode(Request{req::Profile{bad}})), Request{req::Profile{replaced}});
+    Status s;
+    s.warnings = {bad};
+    const auto ok = decode_response(encode(Response::success(s)));
+    ASSERT_TRUE(ok.has_value()) << ok.error();
+    EXPECT_EQ(ok->status.value().warnings, std::vector<std::string>{replaced});
+    EXPECT_NE(encode_status(s, 2).find(replaced), std::string::npos);
+}
+
+// Decoding never yields invalid UTF-8 (ill-formed bytes and lone surrogates are rejected), so what
+// a client sends cannot reach the state file or the Waybar stream as raw bytes.
+TEST(Ipc, DecodingRejectsIllFormedUtf8) {
+    EXPECT_FALSE(decode_request("{\"cmd\":\"profile\",\"select\":\"caf\xe9\"}").has_value());
+    EXPECT_FALSE(decode_request(R"({"cmd":"profile","select":"\ud800"})").has_value());
+    EXPECT_FALSE(decode_response("{\"ok\":false,\"error\":\"\xff\",\"status\":null}").has_value());
+}
+
 TEST(Ipc, BindSetsMode0600) {
     TempDir d;
     const auto p = d.path() / "s.sock";
