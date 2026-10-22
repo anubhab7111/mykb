@@ -1,0 +1,14 @@
+// omen-kbd: Waybar module for ~/dotfiles/config-waybar/.config/waybar/config.
+// Add "custom/kbd" to "modules-right" (e.g. before "battery") and this entry next
+// to the other custom modules; styles are in waybar-style.css. Full paths: Waybar
+// runs with Hyprland's PATH, which has no ~/.local/bin. No "escape": omen-kbd
+// already escapes markup in what it prints.
+"custom/kbd": {
+  "exec": "~/.local/bin/omen-kbd waybar",
+  "return-type": "json",
+  "tooltip": true,
+  "on-click": "~/.local/bin/omen-kbd profile next",
+  "on-click-right": "~/.local/bin/omen-kbd toggle",
+  "on-scroll-up": "~/.local/bin/omen-kbd brightness +10",
+  "on-scroll-down": "~/.local/bin/omen-kbd brightness -10"
+}
