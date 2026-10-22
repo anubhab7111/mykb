@@ -273,6 +273,36 @@ TEST(Model, SuspendedYieldsNoInputs) {
     EXPECT_EQ(in(m).hint, std::nullopt) << "suspend cleared the hint";
 }
 
+// A hint can still arrive while suspended (a key event racing PrepareForSleep) and must expire all
+// the same: the daemon wakes at hint_deadline(), and a deadline in the past wakes it in a loop.
+TEST(Model, HintExpiresWhileSuspended) {
+    Model m = hex_model();
+    const TimePoint t0 = Clock::now();
+    m.set_suspended(true);
+    ASSERT_TRUE(m.handle(req::Hint{"super"}, t0).has_value());
+    EXPECT_FALSE(m.inputs(t0 + 16s).has_value());
+    EXPECT_EQ(m.hint_deadline(), std::nullopt);
+}
+
+// Spec: "idle/lock/Fn-off/suspend → stop ticking", whatever the gate does to the backlight
+// (here on_idle = dim, on_lock = off).
+TEST(Model, IdleAndLockStopEffectsUntilTheyEnd) {
+    Model m = hex_model();
+    ASSERT_TRUE(in(m).animate);
+    ASSERT_TRUE(req_(m, req::Idle{true}).has_value());
+    EXPECT_FALSE(in(m).animate) << "idle";
+    EXPECT_FALSE(m.wants_animation()) << "idle";
+    ASSERT_TRUE(req_(m, req::Idle{false}).has_value());
+    EXPECT_TRUE(in(m).animate) << "after idle";
+    EXPECT_TRUE(m.wants_animation()) << "after idle";
+    m.apply_fact(fact::Locked{true});
+    EXPECT_FALSE(in(m).animate) << "locked";
+    EXPECT_FALSE(m.wants_animation()) << "locked";
+    m.apply_fact(fact::Locked{false});
+    EXPECT_TRUE(in(m).animate) << "after unlock";
+    EXPECT_TRUE(m.wants_animation()) << "after unlock";
+}
+
 TEST(Model, StatusReportsOutputZones) {
     Model m = hex_model();
     ASSERT_TRUE(set(m, {"#ff0000", "#00ff00", "#0000ff", "#ffffff"}).has_value());

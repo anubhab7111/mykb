@@ -111,6 +111,41 @@ class DaemonTest : public ::testing::Test {
 
     Status status() { return req(req::Status{}).status.value(); }
 
+    /// Writes `out` on a fresh connection and reads `n` replies (2 s timeout per read).
+    std::vector<Response> raw_exchange(std::string_view out, std::size_t n) {
+        UniqueFd fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+        sockaddr_un addr{};
+        addr.sun_family = AF_UNIX;
+        std::strncpy(addr.sun_path, sock().c_str(), sizeof(addr.sun_path) - 1);
+        if (::connect(fd.get(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+            ADD_FAILURE() << "connect: " << std::strerror(errno);
+            return {};
+        }
+        timeval tv{.tv_sec = 2, .tv_usec = 0};
+        ::setsockopt(fd.get(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        if (::write(fd.get(), out.data(), out.size()) != static_cast<ssize_t>(out.size())) {
+            ADD_FAILURE() << "short write";
+            return {};
+        }
+        LineBuffer lines;
+        std::vector<Response> got;
+        char buf[4096];
+        while (got.size() < n) {
+            if (auto line = lines.next_line()) {
+                got.push_back(decode_response(*line).value());
+                continue;
+            }
+            const ssize_t k = ::read(fd.get(), buf, sizeof(buf));
+            if (k <= 0) {
+                ADD_FAILURE() << "connection closed or timed out after " << got.size()
+                              << " replies";
+                return got;
+            }
+            lines.append({buf, static_cast<std::size_t>(k)});
+        }
+        return got;
+    }
+
     [[nodiscard]] std::filesystem::path config_path() const { return dir_.path() / "config.toml"; }
     [[nodiscard]] std::filesystem::path state_path() const { return dir_.path() / "state.json"; }
     [[nodiscard]] std::filesystem::path sock() const { return dir_.path() / "omen-kbd.sock"; }
@@ -199,6 +234,18 @@ TEST_F(DaemonTest, OffTurnsBacklightOffWithoutZoneWrite) {
     EXPECT_EQ(h().ops(), expected);
 }
 
+// The Fn key changes the firmware backlight behind the daemon's back (nothing reports it while a
+// static profile shows), so `on` must write the backlight even when the daemon believes it is on.
+TEST_F(DaemonTest, OnAfterFnKeyOffWritesTheBacklight) {
+    start(kStaticCfg);
+    h().set_hw_backlight(false); // the Fn key
+    auto expected = h().ops();
+    const Response r = req(req::Power{req::PowerAction::On});
+    EXPECT_TRUE(r.ok) << r.error.value_or("");
+    expected.push_back(MockOp::backlight_op(true));
+    EXPECT_EQ(h().ops(), expected) << "one backlight write, no zone write";
+}
+
 TEST_F(DaemonTest, EffectTicksAtConfiguredFps) {
     start(kWaveCfg);
     std::this_thread::sleep_for(300ms);
@@ -219,6 +266,25 @@ TEST_F(DaemonTest, FnKeyOffPausesEffect) {
     h().set_hw_backlight(true);
     EXPECT_TRUE(wait_until([&] { return zone_writes().size() > a + 3; }, 5000ms))
         << "resumes after the Fn key turns it back on";
+}
+
+// Spec: "idle/lock/Fn-off/suspend → stop ticking"; on_idle = dim (the default) and on_lock = dim
+// keep the backlight on, so only the effect gate can stop the writes.
+TEST_F(DaemonTest, IdleAndLockStopTheEffectUntilTheyEnd) {
+    start(std::string(kWaveCfg) + "[gates]\non_lock = \"dim\"\n");
+    const auto writes_in_500ms = [this] {
+        const auto a = zone_writes().size();
+        std::this_thread::sleep_for(500ms);
+        return zone_writes().size() - a;
+    };
+    ASSERT_TRUE(req(req::Idle{true}).ok);
+    EXPECT_EQ(writes_in_500ms(), 0u) << "idle stops ticking";
+    ASSERT_TRUE(req(req::Idle{false}).ok);
+    EXPECT_GE(writes_in_500ms(), 3u) << "ticking resumes after idle";
+    ASSERT_TRUE(req(req::Flag{"locked", true}).ok);
+    EXPECT_EQ(writes_in_500ms(), 0u) << "lock stops ticking";
+    ASSERT_TRUE(req(req::Flag{"locked", false}).ok);
+    EXPECT_GE(writes_in_500ms(), 3u) << "ticking resumes after unlock";
 }
 
 TEST_F(DaemonTest, BudgetErrorDropsToStatic) {
@@ -244,6 +310,59 @@ TEST_F(DaemonTest, ResumeForcesIdenticalRewrite) {
     const auto after = zone_writes();
     ASSERT_EQ(after.size(), before.size() + 1) << "exactly one extra write";
     EXPECT_EQ(after.back(), before.back()) << "identical frame";
+}
+
+// hypridle locks before sleep and on_lock = "off" is the default, so the frame at resume turns the
+// backlight off: the colors must still be re-asserted once the lock ends.
+TEST_F(DaemonTest, ResumeWhileLockedRewritesTheZonesAtUnlock) {
+    start(kStaticCfg);
+    ASSERT_TRUE(req(req::Flag{"locked", true}).ok);
+    const auto before = zone_writes().size();
+    const auto ops = h().ops().size();
+    daemon_->post(event::Sleep{true});
+    daemon_->post(event::Sleep{false});
+    EXPECT_TRUE(wait_until([&] { return h().ops().size() > ops; }, 2000ms))
+        << "resume re-asserts the backlight state";
+    std::this_thread::sleep_for(200ms);
+    EXPECT_EQ(h().ops().back(), MockOp::backlight_op(false));
+    EXPECT_EQ(zone_writes().size(), before) << "no zone write while locked";
+    ASSERT_TRUE(req(req::Flag{"locked", false}).ok);
+    EXPECT_EQ(zone_writes().size(), before + 1) << "colors re-asserted at unlock";
+}
+
+// hypridle's on_lock_cmd can also land after PrepareForSleep(true): it locks because of the sleep.
+TEST_F(DaemonTest, LockDuringSuspendStillRewritesTheZonesAtUnlock) {
+    start(kStaticCfg);
+    const auto before = zone_writes().size();
+    daemon_->post(event::Sleep{true});
+    std::this_thread::sleep_for(100ms);
+    ASSERT_TRUE(req(req::Flag{"locked", true}).ok);
+    const auto ops = h().ops().size();
+    daemon_->post(event::Sleep{false});
+    EXPECT_TRUE(wait_until([&] { return h().ops().size() > ops; }, 2000ms));
+    std::this_thread::sleep_for(200ms);
+    EXPECT_EQ(h().ops().back(), MockOp::backlight_op(false));
+    EXPECT_EQ(zone_writes().size(), before) << "no zone write while locked";
+    ASSERT_TRUE(req(req::Flag{"locked", false}).ok);
+    EXPECT_EQ(zone_writes().size(), before + 1) << "colors re-asserted at unlock";
+}
+
+// The real module spaces writes >= 50 ms apart, so the forced resume frame can wait in the
+// writer's one-slot mailbox and be replaced by a later frame; the rewrite must survive that.
+TEST_F(DaemonTest, ResumeRewriteSurvivesBeingReplacedInTheWriterSlot) {
+    start(kStaticCfg);
+    const auto before = zone_writes().size();
+    h().set_delay(300ms);
+    daemon_->post(FactUpdate{fact::LidClosed{true}}); // the writer turns the backlight off: busy
+    std::this_thread::sleep_for(50ms);
+    daemon_->post(FactUpdate{fact::LidClosed{false}}); // {on} waits in the slot
+    daemon_->post(event::Sleep{true});
+    daemon_->post(event::Sleep{false});            // the forced {on} replaces it
+    daemon_->post(FactUpdate{fact::Locked{true}}); // {off} replaces the forced frame
+    std::this_thread::sleep_for(800ms);            // both backlight writes are done
+    h().set_delay(0ms);
+    ASSERT_TRUE(req(req::Flag{"locked", false}).ok);
+    EXPECT_EQ(zone_writes().size(), before + 1) << "colors re-asserted after resume";
 }
 
 TEST_F(DaemonTest, BadReloadKeepsPreviousConfig) {
@@ -332,30 +451,21 @@ TEST_F(DaemonTest, SubscribeStreamsStatusChanges) {
 // Not in the Rust suite: the hand-written C++ connection handling.
 TEST_F(DaemonTest, GarbageLineGetsAnErrorAndTheConnectionStaysUsable) {
     start(kStaticCfg);
-    UniqueFd fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
-    sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-    std::strncpy(addr.sun_path, sock().c_str(), sizeof(addr.sun_path) - 1);
-    ASSERT_EQ(::connect(fd.get(), reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
-    timeval tv{.tv_sec = 2, .tv_usec = 0};
-    ::setsockopt(fd.get(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    const std::string out = "not json\n" + encode(Request{req::Status{}}) + "\n";
-    ASSERT_EQ(::write(fd.get(), out.data(), out.size()), static_cast<ssize_t>(out.size()));
-    LineBuffer lines;
-    std::vector<Response> got;
-    char buf[4096];
-    while (got.size() < 2) {
-        if (auto line = lines.next_line()) {
-            got.push_back(decode_response(*line).value());
-            continue;
-        }
-        const ssize_t n = ::read(fd.get(), buf, sizeof(buf));
-        ASSERT_GT(n, 0) << "connection closed or timed out";
-        lines.append({buf, static_cast<std::size_t>(n)});
-    }
+    const auto got = raw_exchange("not json\n" + encode(Request{req::Status{}}) + "\n", 2);
+    ASSERT_EQ(got.size(), 2u);
     EXPECT_FALSE(got[0].ok);
     EXPECT_TRUE(got[1].ok);
     EXPECT_EQ(got[1].status.value().profile, "plain");
+}
+
+// nlohmann's parse error quotes the offending byte; replying with it must not end the daemon.
+TEST_F(DaemonTest, InvalidUtf8LineGetsAnErrorAndTheDaemonSurvives) {
+    start(kStaticCfg);
+    const auto got = raw_exchange("\xff\n" + encode(Request{req::Status{}}) + "\n", 2);
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_FALSE(got[0].ok);
+    EXPECT_TRUE(got[1].ok);
+    EXPECT_EQ(status().profile, "plain") << "new connections are still served";
 }
 
 TEST(EventLoop, TimersRunInOrderPostWorksAcrossThreadsAndCancelSkips) {

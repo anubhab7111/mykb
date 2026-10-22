@@ -104,7 +104,7 @@ void Daemon::handle_event(const Event &ev) {
                 if (e.entering) {
                     save();
                 } else {
-                    force_next_ = true; // the firmware may have reset the colors
+                    force_next_ = true; // the firmware may have reset the colors and backlight
                 }
             } else if constexpr (std::is_same_v<T, event::Submap>) {
                 model_.set_submap(e.name);
@@ -131,10 +131,12 @@ std::optional<std::uint64_t> Daemon::recompute() {
         Output out = compose(*in, std::chrono::duration<double>(now - start_).count());
         const auto hw = model_.config().device.zone_map.to_hw(out.zones);
         const std::pair key{out.backlight, hw};
-        if (force_next_ || last_job_ != key) {
+        if (force_next_ || force_backlight_next_ || last_job_ != key) {
             ++generation_;
-            writer_->submit(WriteJob{generation_, out.backlight, hw, force_next_});
+            writer_->submit(
+                WriteJob{generation_, out.backlight, hw, force_next_, force_backlight_next_});
             force_next_ = false;
+            force_backlight_next_ = false;
             last_job_ = key;
             sent = generation_;
         }
@@ -331,6 +333,10 @@ void Daemon::on_request(std::uint64_t id, Client &c, const Request &r) {
     }
     if (*change == Change::OutputAndPersist) {
         schedule_save(kSaveUserChange);
+    }
+    if (std::holds_alternative<req::Power>(r)) {
+        // The Fn key may have changed the backlight behind our back: on/off/toggle always write it.
+        force_backlight_next_ = true;
     }
     if (const auto generation = recompute()) {
         pending_.push_back({*generation, id, Clock::now() + kReplyTimeout});

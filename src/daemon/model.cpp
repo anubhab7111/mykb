@@ -259,11 +259,13 @@ bool Model::wants_animation() const {
 }
 
 std::optional<Inputs> Model::inputs(TimePoint now) {
-    if (suspended_) {
-        return std::nullopt;
-    }
+    // Before the suspend check: the daemon wakes at hint_deadline(), so a hint that expires while
+    // suspended must go too.
     if (const auto d = hint_deadline(); d && now >= *d) {
         hint_.reset();
+    }
+    if (suspended_) {
+        return std::nullopt;
     }
     const RuleOutcome r = rules();
     std::vector<std::string> warnings;
@@ -343,7 +345,8 @@ Effect Model::shown_effect(const std::string &profile) const {
 }
 
 bool Model::animation_allowed() const {
-    return config_.effects.enabled && !budget_exhausted_ &&
+    // Idle and lock stop the ticking whatever their gate does to the backlight (dim, keep).
+    return config_.effects.enabled && !budget_exhausted_ && !facts_.idle && !facts_.locked &&
            !(facts_.on_battery == true && config_.gates.pause_effects_on_battery);
 }
 

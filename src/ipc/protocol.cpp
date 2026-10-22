@@ -9,6 +9,12 @@ namespace {
 
 using ojson = nlohmann::ordered_json;
 
+/// Invalid UTF-8 becomes U+FFFD instead of an exception: error text can quote raw bytes (a bad
+/// request line, a corrupt state file), and CLI arguments arrive in any encoding.
+std::string text(const ojson &j, int indent = -1) {
+    return j.dump(indent, ' ', false, ojson::error_handler_t::replace);
+}
+
 template <class T> ojson opt_json(const std::optional<T> &v) {
     return v ? ojson(*v) : ojson(nullptr);
 }
@@ -168,7 +174,7 @@ std::string encode(const Request &r) {
         ojson operator()(const req::Reload &) const { return {{"cmd", "reload"}}; }
         ojson operator()(const req::Subscribe &) const { return {{"cmd", "subscribe"}}; }
     };
-    return std::visit(Visitor{}, r).dump();
+    return text(std::visit(Visitor{}, r));
 }
 
 std::expected<Request, std::string> decode_request(std::string_view line) {
@@ -179,13 +185,12 @@ std::expected<Request, std::string> decode_request(std::string_view line) {
     }
 }
 
-std::string encode_status(const Status &s, int indent) { return status_json(s).dump(indent); }
+std::string encode_status(const Status &s, int indent) { return text(status_json(s), indent); }
 
 std::string encode(const Response &r) {
-    return ojson{{"ok", r.ok},
-                 {"error", opt_json(r.error)},
-                 {"status", r.status ? status_json(*r.status) : ojson(nullptr)}}
-        .dump();
+    return text(ojson{{"ok", r.ok},
+                      {"error", opt_json(r.error)},
+                      {"status", r.status ? status_json(*r.status) : ojson(nullptr)}});
 }
 
 std::expected<Response, std::string> decode_response(std::string_view line) {
