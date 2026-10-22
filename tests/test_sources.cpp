@@ -59,6 +59,38 @@ class LoopThread {
     std::thread t_;
 };
 
+/// Sets (or, with nullopt, unsets) an environment variable until destroyed.
+class ScopedEnv {
+  public:
+    ScopedEnv(const char *name, const std::optional<std::string> &value) : name_(name) {
+        if (const char *old = std::getenv(name)) {
+            old_ = old;
+        }
+        set(value);
+    }
+    ~ScopedEnv() { set(old_); }
+    ScopedEnv(const ScopedEnv &) = delete;
+    ScopedEnv &operator=(const ScopedEnv &) = delete;
+
+  private:
+    void set(const std::optional<std::string> &v) const {
+        if (v) {
+            ::setenv(name_, v->c_str(), 1);
+        } else {
+            ::unsetenv(name_);
+        }
+    }
+    const char *name_;
+    std::optional<std::string> old_;
+};
+
+/// A socket file nobody listens on, as a crashed Hyprland leaves behind.
+void make_dead_socket(const fs::path &p) {
+    fs::create_directories(p.parent_path());
+    auto s = bind_socket(p);
+    ASSERT_TRUE(s.has_value()) << s.error().message();
+} // closed here; the file stays
+
 UniqueFd accept_within(int listen_fd, std::chrono::milliseconds timeout) {
     pollfd p{listen_fd, POLLIN, 0};
     if (::poll(&p, 1, static_cast<int>(timeout.count())) != 1) {
@@ -101,7 +133,7 @@ TEST(Hyprland, Socket2DisconnectClearsSubmapAndReconnects) {
     ASSERT_TRUE(listener.has_value()) << listener.error().message();
     EventLoop loop;
     Events events;
-    HyprlandSource src(loop, [path] { return std::optional(path); }, events.sink());
+    HyprlandSource src(loop, [path] { return std::vector{path}; }, events.sink());
     LoopThread running(loop);
 
     UniqueFd first = accept_within(listener->get(), 2000ms);
@@ -117,6 +149,74 @@ TEST(Hyprland, Socket2DisconnectClearsSubmapAndReconnects) {
     EXPECT_GE(Clock::now() - dropped, 800ms) << "after the 1 s backoff, not in a loop";
     EXPECT_EQ(events.get(),
               (std::vector<Event>{event::Submap{"resize"}, event::Submap{std::nullopt}}));
+}
+
+// A socket file outlives a crashed Hyprland, so each candidate is tried until one accepts.
+TEST(Hyprland, TriesEachSocket2CandidateUntilOneAccepts) {
+    TempDir d;
+    const fs::path dead = d.path() / "dead/.socket2.sock";
+    make_dead_socket(dead);
+    const fs::path live = d.path() / "live/.socket2.sock";
+    fs::create_directories(live.parent_path());
+    auto listener = bind_socket(live);
+    ASSERT_TRUE(listener.has_value()) << listener.error().message();
+    EventLoop loop;
+    Events events;
+    HyprlandSource src(loop, [dead, live] { return std::vector{dead, live}; }, events.sink());
+    LoopThread running(loop);
+
+    UniqueFd conn = accept_within(listener->get(), 2000ms);
+    ASSERT_TRUE(conn) << "connects to the live candidate at start";
+    const std::string line = "submap>>resize\n";
+    ASSERT_EQ(::write(conn.get(), line.data(), line.size()), static_cast<ssize_t>(line.size()));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    EXPECT_EQ(events.get(), std::vector<Event>{event::Submap{"resize"}});
+}
+
+TEST(Hyprland, Socket2CandidatesPutTheSignatureFirstThenTheNewest) {
+    TempDir rt;
+    const auto sock = [&rt](std::string_view sig) {
+        return rt.path() / "hypr" / sig / ".socket2.sock";
+    };
+    const auto now = fs::file_time_type::clock::now();
+    write_file(sock("OLD"), "");
+    write_file(sock("MID"), "");
+    write_file(sock("NEW"), "");
+    fs::last_write_time(sock("OLD"), now - 3h);
+    fs::last_write_time(sock("MID"), now - 2h);
+    fs::last_write_time(sock("NEW"), now - 1h);
+    fs::create_directories(rt.path() / "hypr/EMPTY"); // an instance directory without a socket
+    const ScopedEnv runtime("XDG_RUNTIME_DIR", rt.path().string());
+    {
+        const ScopedEnv sig("HYPRLAND_INSTANCE_SIGNATURE", "OLD");
+        EXPECT_EQ(socket2_paths(), (std::vector{sock("OLD"), sock("NEW"), sock("MID")}));
+    }
+    {
+        const ScopedEnv sig("HYPRLAND_INSTANCE_SIGNATURE", std::nullopt);
+        EXPECT_EQ(socket2_paths(), (std::vector{sock("NEW"), sock("MID"), sock("OLD")}));
+    }
+    {
+        const ScopedEnv sig("HYPRLAND_INSTANCE_SIGNATURE", "GONE"); // its directory is gone
+        EXPECT_EQ(socket2_paths(), (std::vector{sock("NEW"), sock("MID"), sock("OLD")}));
+    }
+}
+
+// The review's case: a crashed Hyprland left OLD's socket file, the daemon's environment still
+// names OLD, and NEW is the live instance.
+TEST(Hyprland, StaleSignatureFallsBackToTheLiveInstance) {
+    TempDir rt;
+    make_dead_socket(rt.path() / "hypr/OLD/.socket2.sock");
+    const fs::path live = rt.path() / "hypr/NEW/.socket2.sock";
+    fs::create_directories(live.parent_path());
+    auto listener = bind_socket(live);
+    ASSERT_TRUE(listener.has_value()) << listener.error().message();
+    const ScopedEnv runtime("XDG_RUNTIME_DIR", rt.path().string());
+    const ScopedEnv sig("HYPRLAND_INSTANCE_SIGNATURE", "OLD");
+    EventLoop loop;
+    Events events;
+    HyprlandSource src(loop, socket2_paths, events.sink());
+    LoopThread running(loop);
+    EXPECT_TRUE(accept_within(listener->get(), 2000ms)) << "the live instance is found";
 }
 
 TEST(Theme, LinkChainFollowsRiceLayout) {

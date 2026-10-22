@@ -551,7 +551,7 @@ int run_daemon(const RunOptions &opts) {
         }
     };
     if (opts.with_sources) {
-        hyprland.emplace(d.loop(), socket2_path, emit);
+        hyprland.emplace(d.loop(), socket2_paths, emit);
         system.emplace(d.loop(), emit);
         sync_sources(config_for_sources);
         d.on_config_replaced(sync_sources);
