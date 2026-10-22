@@ -71,6 +71,28 @@ TEST(GenHyprland, ListsConfiguredSets) {
     EXPECT_EQ(lua.find("logger"), std::string::npos); // no key logging of any kind
 }
 
+TEST(GenHyprland, CallsTheGivenCommand) {
+    const auto lua = gen_hyprland(hints_config(), "/home/u/.local/bin/omen-kbd");
+    EXPECT_NE(lua.find(R"(hl.exec_cmd("/home/u/.local/bin/omen-kbd hint " .. pending))"),
+              std::string::npos)
+        << lua;
+    EXPECT_NE(lua.find(R"(hl.exec_cmd("/home/u/.local/bin/omen-kbd hint clear"))"),
+              std::string::npos);
+}
+
+// Hyprland's PATH may not include ~/.local/bin, so the hook calls the binary by its full path
+// when that path is safe inside both a Lua string and `sh -c`.
+TEST(GenHyprland, HookCommandIsTheBinaryPathWhenShellSafe) {
+    EXPECT_EQ(hook_command("/home/u/.local/bin/omen-kbd"), "/home/u/.local/bin/omen-kbd");
+    EXPECT_EQ(hook_command("/opt/omen_kbd-1.0+git/bin/omen-kbd"),
+              "/opt/omen_kbd-1.0+git/bin/omen-kbd");
+    EXPECT_EQ(hook_command("/home/u/my tools/omen-kbd"), "omen-kbd");
+    EXPECT_EQ(hook_command("/home/u/$(x)/omen-kbd"), "omen-kbd");
+    EXPECT_EQ(hook_command("/home/u/\"q\"/omen-kbd"), "omen-kbd");
+    EXPECT_EQ(hook_command("relative/omen-kbd"), "omen-kbd");
+    EXPECT_EQ(hook_command(""), "omen-kbd");
+}
+
 TEST(GenHyprland, UsesRepeatTickerNotOneshot) {
     const auto lua = gen_hyprland(hints_config());
     EXPECT_NE(lua.find(R"(type = "repeat")"), std::string::npos);
