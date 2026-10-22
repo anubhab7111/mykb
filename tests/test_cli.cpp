@@ -96,6 +96,21 @@ TEST(Cli, CommandsMapToRequests) {
     EXPECT_FALSE(parse({"explode"}).first.has_value());
 }
 
+// Waybar renders text and tooltip as Pango markup; user text must not break it.
+TEST(Cli, WaybarEscapesPangoMarkup) {
+    Status s = sample();
+    s.profile = "R&D <night>";
+    s.last_error = "can't write \"zones\" & <backlight>";
+    const auto j = waybar_json(s);
+    EXPECT_EQ(j["text"], "󰌌 R&amp;D &lt;night&gt;");
+    const auto tooltip = j["tooltip"].get<std::string>();
+    EXPECT_NE(tooltip.find("R&amp;D &lt;night&gt;"), std::string::npos) << tooltip;
+    EXPECT_NE(tooltip.find("can't write \"zones\" &amp; &lt;backlight&gt;"), std::string::npos)
+        << tooltip;
+    EXPECT_EQ(tooltip.find("R&D"), std::string::npos);
+    EXPECT_EQ(format_status(s).find("&amp;"), std::string::npos) << "plain text for the CLI";
+}
+
 TEST(Cli, WaybarOnOffHintError) {
     const auto on = waybar_json(sample());
     EXPECT_EQ(on["text"], "󰌌 default");

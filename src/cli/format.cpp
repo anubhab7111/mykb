@@ -19,6 +19,28 @@ std::string join(const std::vector<std::string> &items, std::string_view sep) {
 
 const char *on_off(bool b) { return b ? "on" : "off"; }
 
+/// Waybar renders a module's text and tooltip as Pango markup.
+std::string pango_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size());
+    for (const char c : s) {
+        switch (c) {
+        case '&':
+            out += "&amp;";
+            break;
+        case '<':
+            out += "&lt;";
+            break;
+        case '>':
+            out += "&gt;";
+            break;
+        default:
+            out += c;
+        }
+    }
+    return out;
+}
+
 } // namespace
 
 std::string format_status(const Status &s) {
@@ -68,10 +90,10 @@ nlohmann::json waybar_json(const Status &s) {
                       : s.hint                             ? "hint"
                       : s.animated                         ? "effect"
                                                            : "on";
-    return {{"text", s.on ? "󰌌 " + s.profile : std::string("󰌐 off")},
+    return {{"text", s.on ? "󰌌 " + pango_escape(s.profile) : std::string("󰌐 off")},
             {"class", cls},
             {"percentage", s.brightness},
-            {"tooltip", format_status(s)}};
+            {"tooltip", pango_escape(format_status(s))}};
 }
 
 } // namespace omenkbd
