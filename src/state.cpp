@@ -108,7 +108,9 @@ std::expected<void, std::string> PersistedState::save(const std::filesystem::pat
         }
     }
     const auto tmp = with_suffix(path, ".tmp");
-    const std::string text = to_json(*this).dump(2) + "\n";
+    // Invalid UTF-8 becomes U+FFFD: save() runs in a daemon timer and must not throw.
+    const std::string text =
+        to_json(*this).dump(2, ' ', false, json::error_handler_t::replace) + "\n";
     {
         UniqueFd fd(::open(tmp.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
         if (!fd) {
