@@ -1,1 +1,10 @@
 /build
+# kbuild outputs of the kernel module
+/kernel/hp-omen-kbd/*.o
+/kernel/hp-omen-kbd/*.ko
+/kernel/hp-omen-kbd/*.mod
+/kernel/hp-omen-kbd/*.mod.c
+/kernel/hp-omen-kbd/.*.cmd
+/kernel/hp-omen-kbd/modules.order
+/kernel/hp-omen-kbd/Module.symvers
+/kernel/hp-omen-kbd/tests/vm/out/

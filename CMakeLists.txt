@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.28)
-project(omen-kbd VERSION 0.1.0 LANGUAGES CXX)
+project(omen-kbd VERSION 0.1.0 LANGUAGES C CXX)
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -38,6 +41,13 @@ target_link_libraries(omenkbd PUBLIC SDBusCpp::sdbus-c++ nlohmann_json::nlohmann
 target_compile_options(omenkbd PUBLIC -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror)
 target_compile_definitions(omenkbd PUBLIC OMEN_KBD_VERSION="${PROJECT_VERSION}")
 
+# The kernel module's pure core, built for userspace tests (kbuild builds it into the module).
+set(HOK_DIR ${CMAKE_SOURCE_DIR}/kernel/hp-omen-kbd)
+set(HOK_C_WARNINGS -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Werror)
+add_library(hokcore STATIC ${HOK_DIR}/core.c)
+target_include_directories(hokcore PUBLIC ${HOK_DIR} ${HOK_DIR}/tests)
+target_compile_options(hokcore PRIVATE ${HOK_C_WARNINGS})
+
 add_executable(omen-kbd ${CMAKE_SOURCE_DIR}/src/main.cpp)
 target_link_libraries(omen-kbd PRIVATE omenkbd)
 install(TARGETS omen-kbd RUNTIME DESTINATION bin)
@@ -49,3 +59,8 @@ target_link_libraries(omen-kbd-tests PRIVATE omenkbd GTest::gtest_main)
 target_compile_definitions(omen-kbd-tests PRIVATE OMEN_KBD_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 include(GoogleTest)
 gtest_discover_tests(omen-kbd-tests DISCOVERY_TIMEOUT 30)
+
+add_executable(hok-core-tests ${HOK_DIR}/tests/core_test.c)
+target_link_libraries(hok-core-tests PRIVATE hokcore)
+target_compile_options(hok-core-tests PRIVATE ${HOK_C_WARNINGS})
+add_test(NAME hok-core COMMAND hok-core-tests)

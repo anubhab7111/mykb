@@ -1,0 +1,4 @@
+# Kernel C follows the kernel coding style, and checkpatch.pl is its style gate.
+# Keep the repository's C++ style (../.clang-format) away from these files.
+DisableFormat: true
+SortIncludes: Never
