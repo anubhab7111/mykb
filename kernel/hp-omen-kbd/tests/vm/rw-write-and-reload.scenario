@@ -1,0 +1,13 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# A write lands in the firmware and changes bytes 25-36 only: the two table dumps below, one per
+# load, hold every byte.
+load readonly=0 restore_on_unload=0
+write zones 112233 445566 778899 AABBCC\n
+info writes_total
+unload
+load
+read zones
+info header
+info header_changed
+kmsg : table 0
+kmsg-clean

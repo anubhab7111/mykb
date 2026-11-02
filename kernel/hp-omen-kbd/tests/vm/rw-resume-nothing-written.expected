@@ -1,0 +1,4 @@
+VM load: ok
+VM suspend: ok
+VM info writes_total=0
+VM kmsg-clean: yes

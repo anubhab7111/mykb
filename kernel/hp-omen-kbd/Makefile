@@ -3,7 +3,10 @@ KDIR ?= /usr/lib/modules/$(shell uname -r)/build
 
 VM_GATE := gate-plain gate-board-no-wmi gate-board-substring gate-vendor-other
 VM_EMU := emu-basic emu-kbd-type-3 emu-kbd-type-0 emu-kbd-query-fails emu-short-reply
-VM_ALL := $(VM_GATE) $(VM_EMU)
+VM_RW := rw-readonly rw-invalid rw-write-and-reload rw-header-drift rw-restore-on-unload \
+	 rw-off-keeps-colors rw-budget rw-interval rw-interval-clamp rw-firmware-error \
+	 rw-resume-reapply rw-resume-one-kind rw-resume-nothing-written rw-resume-unload
+VM_ALL := $(VM_GATE) $(VM_EMU) $(VM_RW)
 
 SSDT_VARIANTS := KBD_TYPE_3 KBD_TYPE_0 KBD_RET_3 SHORT_GET SET_RET_5 HEADER_DRIFT
 ASL := tests/vm/hp-bios-wmi.asl

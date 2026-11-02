@@ -1,0 +1,25 @@
+VM load: ok
+VM write zones: ok
+VM info writes_total=1
+VM unload: ok
+VM load: ok
+VM read zones: 112233 445566 778899 AABBCC
+VM info header=0102030405060708090a0b0c0d0e0f10111213141516171819
+VM info header_changed=0
+VM kmsg: hp_omen_kbd: table 00000000: 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10
+VM kmsg: hp_omen_kbd: table 00000010: 11 12 13 14 15 16 17 18 19 40 e0 d0 40 e0 d0 40
+VM kmsg: hp_omen_kbd: table 00000020: e0 d0 00 99 ed a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000030: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000040: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000050: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000060: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000070: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000000: 01 02 03 04 05 06 07 08 09 0a 0b 0c 0d 0e 0f 10
+VM kmsg: hp_omen_kbd: table 00000010: 11 12 13 14 15 16 17 18 19 11 22 33 44 55 66 77
+VM kmsg: hp_omen_kbd: table 00000020: 88 99 aa bb cc a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000030: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000040: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000050: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000060: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000070: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg-clean: yes

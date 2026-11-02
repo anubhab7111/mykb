@@ -1,0 +1,10 @@
+VM load: ok
+VM write zones: EPERM
+VM write backlight: EPERM
+VM write zones: EINVAL
+VM write backlight: EINVAL
+VM info writes_total=0
+VM read zones: 40E0D0 40E0D0 40E0D0 0099ED
+VM read backlight: 1
+VM unload: ok
+VM kmsg-clean: yes

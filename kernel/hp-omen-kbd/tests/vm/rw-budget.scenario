@@ -1,0 +1,14 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# Both attributes share the budget. A refused write changes nothing, and the budget does not hold
+# back the restore at unload.
+load readonly=0 max_writes_per_hour=2
+write zones 112233 445566 778899 AABBCC\n
+write backlight 1\n
+write zones AABBCC 778899 445566 112233\n
+write backlight 0\n
+info budget_exhausted
+info writes_last_hour
+read zones
+unload
+kmsg restored the boot colors
+kmsg-clean

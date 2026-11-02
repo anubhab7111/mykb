@@ -1,0 +1,15 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: HEADER_DRIFT
+# The firmware changes a header byte after every SET. The module logs that once, although the second
+# and third writes both see it, and writes back what it just read: byte 0 ends up at 04. Restoring
+# the boot copy would have left it at 02.
+load readonly=0 restore_on_unload=0
+write zones 112233 445566 778899 AABBCC\n
+write zones AABBCC 778899 445566 112233\n
+write zones 112233 445566 778899 AABBCC\n
+info header_changed
+kmsg differs from the boot copy
+unload
+load
+info header
+kmsg-clean

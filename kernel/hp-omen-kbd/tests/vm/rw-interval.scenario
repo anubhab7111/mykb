@@ -1,0 +1,9 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# A write right after another waits out the interval, whichever attribute either one went to. The
+# margin is wide because the VM can lose time between two commands on a busy host.
+load readonly=0 min_interval_ms=800
+write zones 112233 445566 778899 AABBCC\n
+slow-write zones 600 AABBCC 778899 445566 112233\n
+slow-write backlight 600 0\n
+slow-write zones 600 112233 445566 778899 AABBCC\n
+kmsg-clean

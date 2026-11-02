@@ -1,0 +1,7 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# Nothing was written since load, so a resume writes nothing.
+load readonly=0
+suspend
+sleep 1500
+info writes_total
+kmsg-clean

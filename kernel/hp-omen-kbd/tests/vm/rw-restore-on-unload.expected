@@ -1,0 +1,7 @@
+VM load: ok
+VM write zones: ok
+VM unload: ok
+VM kmsg: hp_omen_kbd: restored the boot colors
+VM load: ok
+VM read zones: 40E0D0 40E0D0 40E0D0 0099ED
+VM kmsg-clean: yes

@@ -1,0 +1,10 @@
+VM load: ok
+VM write zones: ok
+VM write backlight: ok
+VM read backlight: 0
+VM unload: ok
+VM load: ok
+VM read zones: 112233 445566 778899 AABBCC
+VM read backlight: 0
+VM info backlight_raw=0x64
+VM kmsg-clean: yes

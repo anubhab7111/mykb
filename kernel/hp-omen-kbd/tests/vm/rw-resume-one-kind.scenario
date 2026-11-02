@@ -1,0 +1,17 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# A resume re-applies only what was written: colors set by hand must not switch the backlight back
+# to some earlier state, and a backlight write must not rewrite the colors.
+load readonly=0
+write backlight 0\n
+suspend
+sleep 2000
+info writes_total
+unload
+load readonly=0
+write zones 112233 445566 778899 AABBCC\n
+suspend
+sleep 2000
+info writes_total
+info last_error
+read backlight
+kmsg-clean
