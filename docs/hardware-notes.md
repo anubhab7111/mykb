@@ -51,11 +51,14 @@ Facts recorded on the real machine, for the hardware validation phase (P4) and l
 The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. The machine was on kernel
 7.2.14-arch1-1 when the module was last tested in the VM (2026-11-02).
 
+- [ ] Step 0, firmware code (optional): reply sizes per method: ; `Serialized`: ; `0x20008/0x2B` reaches:
 - [ ] Step 1, load read-only: `kbd_type` = , `backlight_raw` = , zones match the baseline: ; table:
-- [ ] Step 2, same colors written back: header unchanged:
-- [ ] Step 3, physical zones: hardware 0 = , 1 = , 2 = , 3 =
-- [ ] Step 4, backlight: `backlight_raw` at each Fn level: ; writing colors while off turns it on:
+- [ ] Step 2, same colors written back: table unchanged after a reload:
+- [ ] Step 3, physical zones: hardware 0 = , 1 = , 2 = , 3 = ; table unchanged after a reload:
+- [ ] Step 4, backlight: `backlight_raw` off/on: ; at each Fn level: ; writing colors while off turns it
+      on: ; table unchanged after a reload:
 - [ ] Step 5, suspend twice: ; colors survive with nothing to re-apply:
 - [ ] Step 6, cold boot: shown before login: ; `zones` after login:
-- [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; default frame rate picked:
+- [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; table unchanged after a reload: ; default frame rate
+      picked:
 - [ ] Step 8, unload: boot colors restored:
