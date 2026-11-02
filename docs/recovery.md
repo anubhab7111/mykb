@@ -5,10 +5,6 @@ apply to real hardware, so only from P4 on: before P4 the module is never loaded
 
 The module never replaces or changes `hp-wmi`. Fans, hotkeys and power profiles do not depend on it.
 
-```bash
-D=/sys/devices/platform/hp-omen-kbd
-```
-
 If the daemon is running (P5 on), stop it first, or it will write over what you do here:
 
 ```bash
@@ -20,6 +16,7 @@ systemctl --user stop omen-kbd.service
 The P1 baseline, in hardware order:
 
 ```bash
+D=/sys/devices/platform/hp-omen-kbd
 echo "40E0D0 40E0D0 40E0D0 0099ED" | sudo tee $D/zones
 ```
 
@@ -29,6 +26,7 @@ to step 3.
 ## 2. Turn the backlight on
 
 ```bash
+D=/sys/devices/platform/hp-omen-kbd
 echo 1 | sudo tee $D/backlight
 ```
 
@@ -54,6 +52,8 @@ Before P5 the module does not come back by itself: it was loaded by hand with `i
 `modules-load.d` loads it at every boot. On any mismatch it returns `ENODEV`, so it cannot block a
 boot.
 
+If the machine hangs, hold the power button for 10 seconds, then start it again.
+
 ## 5. Keep an installed module from loading
 
 For one boot: in GRUB, press `e` on the boot entry, add this to the end of the line starting with
@@ -69,12 +69,26 @@ To remove it for good:
 sudo pacman -R hp-omen-kbd-dkms
 ```
 
-## 6. BIOS defaults
+## 6. Reset the embedded controller
+
+This changes no settings, so try it before the BIOS defaults. Shut the machine down, unplug the
+charger, hold the power button for at least 15 seconds, plug the charger back in and start it.
+
+## 7. BIOS defaults
 
 If the firmware itself is stuck on wrong colors or a dark keyboard after all of the above, load the
 BIOS defaults: press F10 at power-on to enter the BIOS setup, load the setup defaults (usually F9),
-then save and exit. This changes every BIOS setting, not only the keyboard, so note any you changed
-first.
+then save and exit.
+
+**This can stop the machine booting.** It changes every BIOS setting, not only the keyboard. Secure
+Boot is off on this machine, and this kernel under GRUB is not set up to pass it. HP's defaults may turn
+it on (not checked on BIOS F.21). Before you save, look at these two in the same setup screens:
+
+- **Secure Boot** must be disabled;
+- **boot order** must still start with GRUB.
+
+If it no longer boots afterwards, go back into the BIOS setup and fix those two. Note any other setting
+you changed before you load the defaults.
 
 ## What the errors mean
 

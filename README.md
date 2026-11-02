@@ -138,7 +138,7 @@ Arch packages: `base-devel linux-headers qemu-system-x86 acpica libarchive dkms 
 
 ```bash
 make -C kernel/hp-omen-kbd                    # build against the running kernel
-make -C kernel/hp-omen-kbd check              # W=1 with -Werror, checkpatch --strict, module checks
+make -C kernel/hp-omen-kbd check              # W=1 with -Werror, checkpatch --strict, module and docs checks
 make -C kernel/hp-omen-kbd vmtest-gate        # the load gate, in a VM; no acpica needed
 make -C kernel/hp-omen-kbd vmtest             # every scenario, against the firmware emulator
 kernel/hp-omen-kbd/tests/check-packaging.sh   # DKMS and the Arch package, built as you, nothing installed
