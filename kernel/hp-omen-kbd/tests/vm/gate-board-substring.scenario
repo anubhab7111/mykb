@@ -1,0 +1,5 @@
+# qemu: -smbios type=2,manufacturer=HP,product=18A4E
+# A board name that only contains 8A4E: the match is exact, not a substring.
+load
+kmsg board not on the allowlist
+kmsg-clean

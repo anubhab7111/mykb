@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-m := hp_omen_kbd.o
+hp_omen_kbd-y := main.o core.o

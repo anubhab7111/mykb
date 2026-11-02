@@ -1,0 +1,5 @@
+# qemu: -smbios type=2,manufacturer=HP,product=8A4E
+# The right board without the HP BIOS WMI interface: the second gate refuses.
+load
+kmsg WMI interface
+kmsg-clean

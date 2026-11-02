@@ -1,0 +1,4 @@
+# A plain VM: its DMI board fields match nothing, so the first gate refuses.
+load
+kmsg board not on the allowlist
+kmsg-clean

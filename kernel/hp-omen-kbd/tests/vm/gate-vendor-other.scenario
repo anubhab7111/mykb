@@ -1,0 +1,5 @@
+# qemu: -smbios type=2,manufacturer=Dell,product=8A4E
+# The right board name from another vendor: the vendor is part of the allowlist.
+load
+kmsg board not on the allowlist
+kmsg-clean
