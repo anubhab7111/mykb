@@ -1,0 +1,22 @@
+# Built from this repository's checkout, not from a download. Installing it is P5, after the
+# hardware validation in docs/hardware-validation.md is signed off.
+pkgname=hp-omen-kbd-dkms
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Four-zone keyboard colors through HP BIOS WMI, for the HP OMEN 16-k0xxx (board 8A4E only)'
+arch=(any)
+license=(GPL-2.0-only)
+depends=(dkms)
+install=hp-omen-kbd-dkms.install
+
+package() {
+	local repo=$startdir/../..
+	local module=$repo/kernel/hp-omen-kbd
+	local packaging=$repo/packaging
+
+	install -Dm644 -t "$pkgdir/usr/src/hp-omen-kbd-$pkgver" \
+		"$module"/{Kbuild,Makefile,dkms.conf,core.c,core.h,main.c}
+	install -Dm644 -t "$pkgdir/usr/lib/udev/rules.d" "$packaging/udev/99-omen-kbd.rules"
+	install -Dm644 -t "$pkgdir/usr/lib/sysusers.d" "$packaging/sysusers/omen-kbd.conf"
+	install -Dm644 -t "$pkgdir/usr/lib/modules-load.d" "$packaging/modules-load/hp-omen-kbd.conf"
+}
