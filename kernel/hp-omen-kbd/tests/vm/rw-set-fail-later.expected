@@ -1,0 +1,10 @@
+VM load: ok
+VM write zones: ok
+VM suspend: ok
+VM kmsg: hp_omen_kbd: re-applying colors after resume failed (-5)
+VM info writes_total=1
+VM info last_error=-5
+VM read zones: 112233 445566 778899 AABBCC
+VM unload: ok
+VM kmsg: hp_omen_kbd: restoring the boot colors failed (-5)
+VM kmsg-clean: yes

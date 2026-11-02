@@ -1,0 +1,7 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: NONBUF_KBD
+# The same for the keyboard type. This package's first element holds 2, so without the type check
+# it would read as a four-zone keyboard and pass the last gate.
+load
+kmsg keyboard type
+kmsg-clean

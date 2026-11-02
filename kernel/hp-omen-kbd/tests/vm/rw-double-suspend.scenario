@@ -1,0 +1,12 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# A second suspend right after a resume: the re-apply still pending must not call the firmware while
+# devices are suspended. One re-apply follows the last resume, 1000 ms later, and only then.
+load readonly=0
+write zones 112233 445566 778899 AABBCC\n
+suspend
+suspend
+info writes_total
+sleep 2000
+info writes_total
+info last_error
+kmsg-clean

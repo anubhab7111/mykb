@@ -1,0 +1,9 @@
+VM load: ok
+VM write zones: EIO
+VM slow-write zones: EIO
+VM slow-write zones: EIO
+VM info writes_last_hour=0
+VM info writes_total=0
+VM info last_error=-5
+VM unload: ok
+VM kmsg-clean: yes

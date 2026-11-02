@@ -1,0 +1,3 @@
+VM load: EIO
+VM kmsg: hp_omen_kbd: color table reads as all 0x00; refusing it
+VM kmsg-clean: yes

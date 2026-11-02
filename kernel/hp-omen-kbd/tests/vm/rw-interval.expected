@@ -3,4 +3,5 @@ VM write zones: ok
 VM slow-write zones: ok
 VM slow-write backlight: ok
 VM slow-write zones: ok
+VM slow-unload: ok
 VM kmsg-clean: yes

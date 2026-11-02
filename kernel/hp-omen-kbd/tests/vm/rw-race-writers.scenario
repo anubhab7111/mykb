@@ -1,0 +1,14 @@
+# qemu: -smp 4 -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: PAIR_CHECK
+# Four writers and three readers on four CPUs. Every write is one GET and its SET with nothing
+# between: the emulator marks byte 127 if it ever sees otherwise, and the last table line shows it.
+# lockdep_assert_held checks nothing on this kernel, so this is what proves the lock.
+load readonly=0 min_interval_ms=33 restore_on_unload=0
+race-start 4 60 3 3000
+race-wait
+info writes_total
+info last_error
+unload
+load
+kmsg : table 00000070
+kmsg-clean

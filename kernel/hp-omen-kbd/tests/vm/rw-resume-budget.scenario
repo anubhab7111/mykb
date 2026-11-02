@@ -1,0 +1,9 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# The re-apply goes through the same guards as any write: with the budget used up it makes no SET.
+load readonly=0 max_writes_per_hour=1
+write zones 112233 445566 778899 AABBCC\n
+suspend
+sleep 2000
+info writes_total
+kmsg re-applying
+kmsg-clean

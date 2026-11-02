@@ -1,0 +1,7 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: NONBUF_GET
+# The color table reply is a package, not a buffer. Its count and elements overlay a buffer's length
+# and data, so without the type check this would load with ACPI's own objects as the color table. An
+# integer would not show that: the length check already refuses it.
+load
+kmsg-clean

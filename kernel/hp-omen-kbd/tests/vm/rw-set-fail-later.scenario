@@ -1,0 +1,15 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: SET_FAIL_LATER
+# The firmware accepts one SET and refuses the rest: a failed re-apply and a failed restore are both
+# logged as what they are, and neither counts as a write.
+load readonly=0
+write zones 112233 445566 778899 AABBCC\n
+suspend
+sleep 2000
+kmsg re-applying
+info writes_total
+info last_error
+read zones
+unload
+kmsg restor
+kmsg-clean
