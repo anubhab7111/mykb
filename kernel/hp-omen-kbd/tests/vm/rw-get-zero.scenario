@@ -1,0 +1,12 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: GET_ZERO_LATER
+# A GET that answers "success" with an all-zero table must not be written back: that would wipe the
+# bytes nobody documents. No SET is made, so the budget stays untouched.
+load readonly=0
+write zones 112233 445566 778899 AABBCC\n
+info writes_last_hour
+info writes_total
+info last_error
+read zones
+kmsg refusing it
+kmsg-clean

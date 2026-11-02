@@ -1,0 +1,6 @@
+VM load: ok
+VM write zones: ok
+VM suspend: ok
+VM info writes_total=1
+VM kmsg: hp_omen_kbd: re-applying colors after resume failed (-16)
+VM kmsg-clean: yes

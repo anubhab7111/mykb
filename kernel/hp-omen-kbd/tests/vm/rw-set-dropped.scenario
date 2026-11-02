@@ -1,0 +1,11 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: SET_DROPPED
+# The firmware reports success and keeps the old table. zones is a cache, so it shows what was asked
+# for; only a reload shows what the firmware has. That is why the runbook compares tables by reloading.
+load readonly=0 restore_on_unload=0
+write zones 112233 445566 778899 AABBCC\n
+read zones
+unload
+load
+read zones
+kmsg-clean

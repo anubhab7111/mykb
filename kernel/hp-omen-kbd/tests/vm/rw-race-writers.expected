@@ -1,0 +1,9 @@
+VM load: ok
+VM race: ok=240 gone=0 other=0 torn=0
+VM info writes_total=240
+VM info last_error=0
+VM unload: ok
+VM load: ok
+VM kmsg: hp_omen_kbd: table 00000070: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg: hp_omen_kbd: table 00000070: a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5 a5
+VM kmsg-clean: yes

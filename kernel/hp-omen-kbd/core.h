@@ -38,6 +38,8 @@ int hok_parse_bool(const char *buf, size_t len);
 void hok_table_get_zones(const u8 *table, struct hok_rgb out[HOK_ZONES]);
 void hok_table_set_zones(u8 *table, const struct hok_rgb zones[HOK_ZONES]);
 bool hok_header_equal(const u8 *a, const u8 *b);
+/* False for a table of all 00 or all ff, which a working firmware has no reason to return. */
+bool hok_table_plausible(const u8 *table);
 
 /* What the sysfs `info` file shows. */
 struct hok_info {

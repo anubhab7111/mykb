@@ -1,0 +1,5 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: AML_ERR_GET
+# The firmware method aborts, so the ACPI call itself fails. The kernel logs an ACPI error for that,
+# so this is the one scenario with no kmsg-clean.
+load

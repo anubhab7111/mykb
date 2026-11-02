@@ -1,0 +1,12 @@
+# qemu: -smp 4 -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# Writers and readers still running when the module goes away: they only ever see the device gone,
+# the restore comes after the last of their writes, and the log stays clean.
+load readonly=0 min_interval_ms=33
+race-start 4 200 3 6000
+sleep 1500
+unload
+race-wait-gone
+kmsg restored the boot colors
+load
+read zones
+kmsg-clean

@@ -119,6 +119,16 @@ bool hok_header_equal(const u8 *a, const u8 *b)
 	return memcmp(a, b, HOK_HEADER_SIZE) == 0;
 }
 
+bool hok_table_plausible(const u8 *table)
+{
+	int i;
+
+	for (i = 1; i < HOK_TABLE_SIZE; i++)
+		if (table[i] != table[0])
+			return true;
+	return table[0] != 0x00 && table[0] != 0xff;
+}
+
 int hok_format_info(char *buf, size_t size, const struct hok_info *info)
 {
 	char header[2 * HOK_HEADER_SIZE + 1];

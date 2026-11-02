@@ -1,0 +1,8 @@
+VM load: ok
+VM write zones: ok
+VM suspend: ok
+VM suspend: ok
+VM info writes_total=1
+VM info writes_total=2
+VM info last_error=0
+VM kmsg-clean: yes

@@ -12,15 +12,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
 #include <sys/syscall.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
 #define ATTR_DIR "/sys/devices/platform/hp-omen-kbd/"
 #define LINE_MAX_LEN 8192
+#define RACE_MAX_CHILDREN 16
 
 /* One write per line, so a kernel console message cannot land inside it. */
 static void say(const char *fmt, ...)
@@ -193,7 +196,9 @@ static void cmd_slow_write(char *args)
 	err = write_attr(args, text);
 	clock_gettime(CLOCK_MONOTONIC, &to);
 	took = elapsed_ms(&from, &to);
-	if (err)
+	if (err && took < atol(min_text))
+		say("VM slow-write %s: %s, fast %ld ms\n", args, err_name(err), took);
+	else if (err)
 		say("VM slow-write %s: %s\n", args, err_name(err));
 	else if (took < atol(min_text))
 		say("VM slow-write %s: fast %ld ms\n", args, took);
@@ -263,6 +268,7 @@ static void count_if_dirty(const char *message, const void *ctx)
 {
 	static const char *const bad[] = {
 		"BUG:", "Oops", "WARNING:", "Call Trace", "general protection",
+		"ACPI Error", "ACPI BIOS Error", "UBSAN:", "INFO: task",
 	};
 	size_t i;
 
@@ -282,6 +288,148 @@ static void cmd_kmsg_clean(void)
 	for_each_kmsg(count_if_dirty, &dirty);
 	if (!dirty)
 		say("VM kmsg-clean: yes\n");
+}
+
+static void cmd_slow_unload(const char *min_text)
+{
+	struct timespec from, to;
+	long took;
+	int err = 0;
+
+	clock_gettime(CLOCK_MONOTONIC, &from);
+	if (syscall(SYS_delete_module, "hp_omen_kbd", O_NONBLOCK))
+		err = errno;
+	clock_gettime(CLOCK_MONOTONIC, &to);
+	took = elapsed_ms(&from, &to);
+	if (err)
+		say("VM slow-unload: %s\n", err_name(err));
+	else if (took < atol(min_text))
+		say("VM slow-unload: fast %ld ms\n", took);
+	else
+		say("VM slow-unload: ok\n");
+}
+
+/*
+ * Writers and readers in child processes. The children count into shared memory
+ * and print nothing, because their order on the console is not deterministic.
+ */
+struct race_counts {
+	int ok;		/* writes that succeeded */
+	int gone;	/* the device had been removed: expected only when racing unload */
+	int other;	/* any other error */
+	int torn;	/* a zones line that no writer wrote */
+};
+
+static struct race_counts *race;
+static pid_t race_pids[RACE_MAX_CHILDREN];
+static int race_children;
+
+static void race_count_error(int err)
+{
+	__atomic_add_fetch(err == ENOENT || err == ENODEV ? &race->gone : &race->other, 1,
+			   __ATOMIC_RELAXED);
+}
+
+/* Writes one color of its own to all four zones, so a mixed line can be told apart. */
+static void race_writer(int id, int iters)
+{
+	unsigned int color = 0x111111u * (unsigned int)(id + 1);
+	char line[64];
+	int n = snprintf(line, sizeof(line), "%06X %06X %06X %06X\n", color, color, color, color);
+	int i;
+
+	for (i = 0; i < iters; i++) {
+		int err = write_file(ATTR_DIR "zones", line, (size_t)n);
+
+		if (err)
+			race_count_error(err);
+		else
+			__atomic_add_fetch(&race->ok, 1, __ATOMIC_RELAXED);
+	}
+}
+
+static int zones_line_is_torn(const char *line)
+{
+	if (strcmp(line, "40E0D0 40E0D0 40E0D0 0099ED") == 0)	/* the emulator's boot colors */
+		return 0;
+	return strlen(line) != 27 || strncmp(line, line + 7, 6) != 0 ||
+	       strncmp(line, line + 14, 6) != 0 || strncmp(line, line + 21, 6) != 0;
+}
+
+static void race_reader(int iters)
+{
+	static const char *const attrs[] = { "zones", "backlight", "info" };
+	char text[4096];
+	int i;
+
+	for (i = 0; i < iters; i++) {
+		int err = read_attr(attrs[i % 3], text, sizeof(text));
+
+		if (err)
+			race_count_error(err);
+		else if (i % 3 == 0 && zones_line_is_torn(text))
+			__atomic_add_fetch(&race->torn, 1, __ATOMIC_RELAXED);
+	}
+}
+
+static void race_spawn(void (*writer)(int, int), void (*reader)(int), int id, int iters)
+{
+	pid_t pid = fork();
+
+	if (pid == 0) {
+		if (writer)
+			writer(id, iters);
+		else
+			reader(iters);
+		_exit(0);
+	}
+	if (pid > 0 && race_children < RACE_MAX_CHILDREN)
+		race_pids[race_children++] = pid;
+}
+
+/* "<writers> <writes each> <readers> <reads each>" */
+static void cmd_race_start(const char *args)
+{
+	int writers = 0, writes = 0, readers = 0, reads = 0;
+	int i;
+
+	sscanf(args, "%d %d %d %d", &writers, &writes, &readers, &reads);
+	if (writers + readers > RACE_MAX_CHILDREN) {
+		say("VM race: too many children\n");
+		return;
+	}
+	race = mmap(NULL, sizeof(*race), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	if (race == MAP_FAILED) {
+		say("VM race: mmap: %s\n", err_name(errno));
+		return;
+	}
+	for (i = 0; i < writers; i++)
+		race_spawn(race_writer, NULL, i, writes);
+	for (i = 0; i < readers; i++)
+		race_spawn(NULL, race_reader, 0, reads);
+}
+
+static void race_wait_all(void)
+{
+	int i;
+
+	for (i = 0; i < race_children; i++)
+		waitpid(race_pids[i], NULL, 0);
+	race_children = 0;
+}
+
+static void cmd_race_wait(void)
+{
+	race_wait_all();
+	say("VM race: ok=%d gone=%d other=%d torn=%d\n", race->ok, race->gone, race->other,
+	    race->torn);
+}
+
+/* After racing unload: how many writes got through depends on timing, so it is not printed. */
+static void cmd_race_wait_gone(void)
+{
+	race_wait_all();
+	say("VM race: other=%d torn=%d\n", race->other, race->torn);
 }
 
 static void run_command(char *line)
@@ -309,6 +457,14 @@ static void run_command(char *line)
 		for_each_kmsg(print_if_matching, args);
 	else if (strcmp(line, "kmsg-clean") == 0)
 		cmd_kmsg_clean();
+	else if (strcmp(line, "slow-unload") == 0 && args)
+		cmd_slow_unload(args);
+	else if (strcmp(line, "race-start") == 0 && args)
+		cmd_race_start(args);
+	else if (strcmp(line, "race-wait") == 0)
+		cmd_race_wait();
+	else if (strcmp(line, "race-wait-gone") == 0)
+		cmd_race_wait_gone();
 	else
 		say("VM bad-command: %s\n", line);
 }

@@ -1,0 +1,6 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: GET_ZERO
+# The same at load: keeping this as the boot copy would make unload restore black.
+load
+kmsg refusing it
+kmsg-clean

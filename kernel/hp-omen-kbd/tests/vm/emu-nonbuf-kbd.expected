@@ -1,0 +1,3 @@
+VM load: ENODEV
+VM kmsg: hp_omen_kbd: keyboard type query failed (-5); not binding
+VM kmsg-clean: yes

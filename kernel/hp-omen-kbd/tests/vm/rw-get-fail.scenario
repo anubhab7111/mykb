@@ -1,0 +1,14 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: GET_FAIL_LATER
+# A firmware that refuses the GET is called no faster than a working one, and no SET was made, so
+# the budget stays untouched. With max 2, charging for the GET would turn the third write into EBUSY.
+load readonly=0 min_interval_ms=800 max_writes_per_hour=2
+write zones 112233 445566 778899 AABBCC\n
+slow-write zones 600 112233 445566 778899 AABBCC\n
+slow-write zones 600 112233 445566 778899 AABBCC\n
+info writes_last_hour
+info writes_total
+info last_error
+unload
+kmsg restor
+kmsg-clean

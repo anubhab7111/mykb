@@ -9,8 +9,10 @@
  * instance, method id, request size, data size. Anything else gets code 6, which
  * no test expects, so a call the module gets wrong fails the scenario.
  *
- * iasl -D picks a variant: KBD_TYPE_3, KBD_TYPE_0, KBD_RET_3, SHORT_GET,
- * SET_RET_5 or HEADER_DRIFT. tests/vm/run.sh loads the one a scenario names.
+ * iasl -D picks a variant, and tests/vm/run.sh loads the one a scenario names.
+ * The Makefile lists them; each is explained where it takes effect below. Keep
+ * multi-line comments out of the #ifdef blocks: iasl 20251212 hung on one that
+ * also held an apostrophe.
  */
 #ifdef KBD_TYPE_3
 #define KBD_TYPE 3
@@ -55,6 +57,9 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
         Name (KRET, KBD_RET)
         Name (SRET, SET_RET)
         Name (BKLT, 0xE4)
+        Name (GCNT, 0)      /* color table GETs so far */
+        Name (SCNT, 0)      /* color table SETs so far */
+        Name (PEND, 0)      /* a GET is still waiting for its SET (PAIR_CHECK) */
 
         Name (TABL, Buffer (128)
         {
@@ -116,6 +121,10 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
                     Return (RCOD (6))
                 }
 
+#ifdef NONBUF_KBD
+                /* A package whose count and elements sit where a buffer has length and data. */
+                Return (Package (9) { 2 })
+#endif
                 Return (RDAT (KRET, Mid (ToBuffer (KTYP), 0, 1)))
             }
 
@@ -131,11 +140,54 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
                     Return (RCOD (6))
                 }
 
+                GCNT = GCNT + 1
 #ifdef SHORT_GET
                 Return (Buffer (4) {})
-#else
-                Return (RDAT (0, TABL))
 #endif
+#ifdef NONBUF_GET
+                /* The same, long enough to pass for a whole table. */
+                Return (Package (136) { 1, 2 })
+#endif
+#ifdef AML_ERR_GET
+                /* The method aborts, so the ACPI call itself fails. */
+                Local1 = 0
+                Return (1 / Local1)
+#endif
+#ifdef GET_ZERO
+                /* A success code with an empty table, from the first GET on. */
+                Return (RDAT (0, Buffer (128) {}))
+#endif
+#ifdef GET_ZERO_LATER
+                /* The same, but only after the GET at load. */
+                If (GCNT > 1)
+                {
+                    Return (RDAT (0, Buffer (128) {}))
+                }
+#endif
+#ifdef GET_FAIL_LATER
+                /* The firmware starts refusing GETs after the one at load. */
+                If (GCNT > 1)
+                {
+                    Return (RCOD (5))
+                }
+#endif
+                /*
+                 * PAIR_CHECK: each write must be a GET and then its SET, with nothing between. A
+                 * GET that finds the SET of an earlier write still missing marks the tail, which
+                 * the scenario reads back. Only the GET at load has no SET after it.
+                 */
+#ifdef PAIR_CHECK
+                If (GCNT > 1)
+                {
+                    If (PEND)
+                    {
+                        TABL [127] = DerefOf (TABL [127]) + 1
+                    }
+
+                    PEND = 1
+                }
+#endif
+                Return (RDAT (0, TABL))
             }
 
             If (QERY == 0x03)
@@ -145,6 +197,21 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
                     Return (RCOD (6))
                 }
 
+                SCNT = SCNT + 1
+#ifdef PAIR_CHECK
+                PEND = 0
+#endif
+#ifdef SET_FAIL_LATER
+                /* The firmware accepts the first SET and refuses the rest. */
+                If (SCNT > 1)
+                {
+                    SRET = 5
+                }
+#endif
+#ifdef SET_DROPPED
+                /* The firmware reports success and keeps the old table. */
+                Return (RDAT (0, TABL))
+#endif
                 If (SRET == 0)
                 {
                     TABL = Mid (Arg2, 16, 128)

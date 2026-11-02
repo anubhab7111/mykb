@@ -67,8 +67,8 @@ static struct {
 	u8 backlight_wanted;
 	bool backlight_written;			/* the firmware accepted a backlight write */
 	struct hok_budget budget;
-	bool set_called;
-	s64 last_set_ms;
+	bool interval_running;
+	s64 interval_start_ms;
 	u64 writes_total;
 	bool header_changed;
 	int last_error;
@@ -111,10 +111,24 @@ static int hok_call(u32 command, u32 query, const void *in, u32 insize, void *ou
 	return ret;
 }
 
+/*
+ * A table of all 00 or all ff with a success code is a firmware fault, not colors. Written back, it
+ * would wipe bytes nobody documents; kept as the boot copy, it would make unload restore black.
+ */
 static int hok_get_table(u8 *table)
 {
-	return hok_call(HOK_CMD_BACKLIGHT, HOK_Q_COLOR_GET, NULL, HOK_TABLE_SIZE,
-			table, HOK_TABLE_SIZE);
+	int ret;
+
+	ret = hok_call(HOK_CMD_BACKLIGHT, HOK_Q_COLOR_GET, NULL, HOK_TABLE_SIZE,
+		       table, HOK_TABLE_SIZE);
+	if (ret)
+		return ret;
+	if (!hok_table_plausible(table)) {
+		pr_warn_ratelimited("color table reads as all 0x%02x; refusing it\n", table[0]);
+		hok.last_error = -EIO;
+		return -EIO;
+	}
+	return 0;
 }
 
 /* Reads the backlight from the firmware, unless the last read is still fresh. */
@@ -137,34 +151,45 @@ static int hok_refresh_backlight(void)
 	return 0;
 }
 
-/* Sleeps out what is left of min_interval_ms since the last SET. */
+/* Sleeps out what is left of min_interval_ms since the last write reached the firmware. */
 static void hok_wait_interval(void)
 {
 	u64 wait_ms;
 
 	lockdep_assert_held(&hok_lock);
 
-	wait_ms = hok_wait_ms(hok.set_called, hok.last_set_ms, hok_now_ms(), min_interval_ms);
+	wait_ms = hok_wait_ms(hok.interval_running, hok.interval_start_ms, hok_now_ms(),
+			      min_interval_ms);
 	if (wait_ms)
 		msleep((unsigned int)wait_ms);
 }
 
-/* The two guards before a write's SET, in order: the interval, then the budget. */
+static void hok_start_interval(void)
+{
+	hok.interval_running = true;
+	hok.interval_start_ms = hok_now_ms();
+}
+
+/* The two guards before a write reaches the firmware, in order: the interval, then the budget. */
 static int hok_write_guards(void)
 {
 	hok_wait_interval();
-	if (!hok_budget_take(&hok.budget, ktime_get_boottime_seconds(), max_writes_per_hour))
+	if (hok_budget_used(&hok.budget, ktime_get_boottime_seconds()) >= max_writes_per_hour)
 		return -EBUSY;
 	return 0;
 }
 
-/* The firmware call behind every write. It ends the interval, whatever the firmware answered. */
+/*
+ * The firmware call behind every write. Whatever the firmware answers, it starts the interval and
+ * counts against the budget. The take fails only for the restore at unload, which the budget does
+ * not hold back: for every other write the guards have just seen room.
+ */
 static int hok_call_set(u32 query, const void *in, u32 insize, void *out, u32 outsize)
 {
 	int ret = hok_call(HOK_CMD_BACKLIGHT, query, in, insize, out, outsize);
 
-	hok.set_called = true;
-	hok.last_set_ms = hok_now_ms();
+	hok_start_interval();
+	hok_budget_take(&hok.budget, ktime_get_boottime_seconds(), max_writes_per_hour);
 	if (!ret)
 		hok.writes_total++;
 	return ret;
@@ -173,7 +198,8 @@ static int hok_call_set(u32 query, const void *in, u32 insize, void *out, u32 ou
 /*
  * A fresh GET, then a SET with only bytes 25-36 changed: all the other bytes go
  * back as the firmware just returned them, even when the header has changed
- * since boot.
+ * since boot. A failed GET makes no SET but still starts the interval, so a
+ * failing firmware is called no faster than a working one.
  */
 static int hok_set_zones(const struct hok_rgb zones[HOK_ZONES])
 {
@@ -181,8 +207,10 @@ static int hok_set_zones(const struct hok_rgb zones[HOK_ZONES])
 	int ret;
 
 	ret = hok_get_table(table);
-	if (ret)
+	if (ret) {
+		hok_start_interval();
 		return ret;
+	}
 	if (!hok_header_equal(table, hok.boot_table) && !hok.header_changed) {
 		hok.header_changed = true;
 		pr_warn("color table header (bytes 0-24) differs from the boot copy; keeping the firmware's bytes\n");

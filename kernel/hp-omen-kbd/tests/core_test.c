@@ -333,6 +333,24 @@ static void BudgetIsARollingHour(void)
 	CHECK(hok_budget_used(&b, 3600) == 5);
 }
 
+static void OnlyAllZeroOrAllOnesTablesAreRefused(void)
+{
+	u8 table[HOK_TABLE_SIZE];
+
+	memset(table, 0x00, sizeof(table));
+	CHECK(!hok_table_plausible(table));
+	memset(table, 0xff, sizeof(table));
+	CHECK(!hok_table_plausible(table));
+
+	table[127] = 0xfe;
+	CHECK(hok_table_plausible(table));
+	memset(table, 0x00, sizeof(table));
+	table[0] = 0x04;
+	CHECK(hok_table_plausible(table));
+	memset(table, 0xa5, sizeof(table));
+	CHECK(hok_table_plausible(table));
+}
+
 int main(void)
 {
 	ZonesParserAcceptsTheDaemonsLine();
@@ -349,6 +367,7 @@ int main(void)
 	KeyboardTypeGate();
 	IntervalClampAndWait();
 	BudgetIsARollingHour();
+	OnlyAllZeroOrAllOnesTablesAreRefused();
 	if (failures) {
 		fprintf(stderr, "hok-core: %d check(s) failed\n", failures);
 		return 1;
