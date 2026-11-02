@@ -1,0 +1,8 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# No parameter gets past the hard limits on the interval.
+load min_interval_ms=1
+info min_interval_ms
+unload
+load min_interval_ms=100000
+info min_interval_ms
+kmsg-clean

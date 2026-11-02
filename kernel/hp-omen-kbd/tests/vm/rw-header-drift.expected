@@ -1,0 +1,10 @@
+VM load: ok
+VM write zones: ok
+VM write zones: ok
+VM write zones: ok
+VM info header_changed=1
+VM kmsg: hp_omen_kbd: color table header (bytes 0-24) differs from the boot copy; keeping the firmware's bytes
+VM unload: ok
+VM load: ok
+VM info header=0402030405060708090a0b0c0d0e0f10111213141516171819
+VM kmsg-clean: yes

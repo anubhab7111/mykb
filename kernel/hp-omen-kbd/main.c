@@ -10,17 +10,21 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/acpi.h>
+#include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/dmi.h>
+#include <linux/jiffies.h>
 #include <linux/ktime.h>
 #include <linux/lockdep.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/pm.h>
 #include <linux/printk.h>
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 #include <linux/timekeeping.h>
+#include <linux/workqueue.h>
 
 #include "core.h"
 
@@ -29,6 +33,7 @@
 #define HOK_WMI_GUID		"5FB7F034-2C63-45E9-BE91-3D44E2C707E4"
 #define HOK_BL_GET_SIZE		4
 #define HOK_BL_CACHE_MS		200
+#define HOK_RESUME_DELAY_MS	1000
 
 static bool readonly = true;
 module_param(readonly, bool, 0444);
@@ -55,14 +60,24 @@ static struct {
 	u8 kbd_type;
 	u8 boot_table[HOK_TABLE_SIZE];
 	struct hok_rgb zones[HOK_ZONES];	/* what the zones attribute reads */
+	bool zones_written;			/* the firmware accepted a zones write */
 	u8 backlight_raw;
 	bool backlight_known;
 	s64 backlight_read_ms;
+	u8 backlight_wanted;
+	bool backlight_written;			/* the firmware accepted a backlight write */
 	struct hok_budget budget;
+	bool set_called;
+	s64 last_set_ms;
 	u64 writes_total;
 	bool header_changed;
 	int last_error;
 } hok;
+
+static s64 hok_now_ms(void)
+{
+	return ktime_to_ms(ktime_get_boottime());
+}
 
 static int hok_call(u32 command, u32 query, const void *in, u32 insize, void *out, u32 outsize)
 {
@@ -105,7 +120,7 @@ static int hok_get_table(u8 *table)
 /* Reads the backlight from the firmware, unless the last read is still fresh. */
 static int hok_refresh_backlight(void)
 {
-	s64 now_ms = ktime_to_ms(ktime_get_boottime());
+	s64 now_ms = hok_now_ms();
 	u8 reply[HOK_BL_GET_SIZE];
 	int ret;
 
@@ -122,6 +137,106 @@ static int hok_refresh_backlight(void)
 	return 0;
 }
 
+/* Sleeps out what is left of min_interval_ms since the last SET. */
+static void hok_wait_interval(void)
+{
+	u64 wait_ms;
+
+	lockdep_assert_held(&hok_lock);
+
+	wait_ms = hok_wait_ms(hok.set_called, hok.last_set_ms, hok_now_ms(), min_interval_ms);
+	if (wait_ms)
+		msleep((unsigned int)wait_ms);
+}
+
+/* The two guards before a write's SET, in order: the interval, then the budget. */
+static int hok_write_guards(void)
+{
+	hok_wait_interval();
+	if (!hok_budget_take(&hok.budget, ktime_get_boottime_seconds(), max_writes_per_hour))
+		return -EBUSY;
+	return 0;
+}
+
+/* The firmware call behind every write. It ends the interval, whatever the firmware answered. */
+static int hok_call_set(u32 query, const void *in, u32 insize, void *out, u32 outsize)
+{
+	int ret = hok_call(HOK_CMD_BACKLIGHT, query, in, insize, out, outsize);
+
+	hok.set_called = true;
+	hok.last_set_ms = hok_now_ms();
+	if (!ret)
+		hok.writes_total++;
+	return ret;
+}
+
+/*
+ * A fresh GET, then a SET with only bytes 25-36 changed: all the other bytes go
+ * back as the firmware just returned them, even when the header has changed
+ * since boot.
+ */
+static int hok_set_zones(const struct hok_rgb zones[HOK_ZONES])
+{
+	u8 table[HOK_TABLE_SIZE];
+	int ret;
+
+	ret = hok_get_table(table);
+	if (ret)
+		return ret;
+	if (!hok_header_equal(table, hok.boot_table) && !hok.header_changed) {
+		hok.header_changed = true;
+		pr_warn("color table header (bytes 0-24) differs from the boot copy; keeping the firmware's bytes\n");
+	}
+	hok_table_set_zones(table, zones);
+	/* The arguments are copied before the call, so the reply can land in table. */
+	return hok_call_set(HOK_Q_COLOR_SET, table, HOK_TABLE_SIZE, table, HOK_TABLE_SIZE);
+}
+
+/* Never touches the color table: "off" must not lose the colors (omen-space bug D2). */
+static int hok_set_backlight(u8 raw)
+{
+	u8 reply;
+	int ret;
+
+	ret = hok_call_set(HOK_Q_BL_SET, &raw, sizeof(raw), &reply, sizeof(reply));
+	if (ret)
+		return ret;
+	hok.backlight_raw = raw;
+	hok.backlight_read_ms = hok_now_ms();
+	hok.backlight_known = true;
+	return 0;
+}
+
+static int hok_write_zones(const struct hok_rgb zones[HOK_ZONES])
+{
+	int ret;
+
+	ret = hok_write_guards();
+	if (ret)
+		return ret;
+	ret = hok_set_zones(zones);
+	if (ret)
+		return ret;
+	memcpy(hok.zones, zones, sizeof(hok.zones));
+	hok.zones_written = true;
+	return 0;
+}
+
+static int hok_write_backlight(u8 raw)
+{
+	int ret;
+
+	ret = hok_write_guards();
+	if (ret)
+		return ret;
+	ret = hok_set_backlight(raw);
+	if (ret)
+		return ret;
+	hok.backlight_wanted = raw;
+	hok.backlight_written = true;
+	return 0;
+}
+
 static ssize_t zones_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	int ret;
@@ -131,7 +246,25 @@ static ssize_t zones_show(struct device *dev, struct device_attribute *attr, cha
 	mutex_unlock(&hok_lock);
 	return ret;
 }
-static DEVICE_ATTR_RO(zones);
+
+static ssize_t zones_store(struct device *dev, struct device_attribute *attr,
+			   const char *buf, size_t count)
+{
+	struct hok_rgb zones[HOK_ZONES];
+	int ret;
+
+	ret = hok_parse_zones(buf, count, zones);
+	if (ret)
+		return ret;
+
+	mutex_lock(&hok_lock);
+	ret = readonly ? -EPERM : hok_write_zones(zones);
+	mutex_unlock(&hok_lock);
+	if (ret)
+		return ret;
+	return count;
+}
+static DEVICE_ATTR_RW(zones);
 
 static ssize_t backlight_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -146,7 +279,24 @@ static ssize_t backlight_show(struct device *dev, struct device_attribute *attr,
 		return ret;
 	return sysfs_emit(buf, "%d\n", on);
 }
-static DEVICE_ATTR_RO(backlight);
+
+static ssize_t backlight_store(struct device *dev, struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int on = hok_parse_bool(buf, count);
+	int ret;
+
+	if (on < 0)
+		return on;
+
+	mutex_lock(&hok_lock);
+	ret = readonly ? -EPERM : hok_write_backlight(on ? HOK_BL_ON : HOK_BL_OFF);
+	mutex_unlock(&hok_lock);
+	if (ret)
+		return ret;
+	return count;
+}
+static DEVICE_ATTR_RW(backlight);
 
 static ssize_t info_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -180,9 +330,56 @@ static struct attribute *hok_attrs[] = {
 };
 ATTRIBUTE_GROUPS(hok);
 
+/* The firmware may have lost what was written while the machine slept. */
+static void hok_reapply_fn(struct work_struct *work)
+{
+	int zones_ret = 0;
+	int backlight_ret = 0;
+
+	mutex_lock(&hok_lock);
+	if (hok.zones_written) {
+		zones_ret = hok_write_guards();
+		if (!zones_ret)
+			zones_ret = hok_set_zones(hok.zones);
+	}
+	if (hok.backlight_written) {
+		backlight_ret = hok_write_guards();
+		if (!backlight_ret)
+			backlight_ret = hok_set_backlight(hok.backlight_wanted);
+	}
+	mutex_unlock(&hok_lock);
+
+	if (zones_ret || backlight_ret)
+		pr_warn("re-applying colors after resume failed (%d)\n",
+			zones_ret ? zones_ret : backlight_ret);
+}
+
+static DECLARE_DELAYED_WORK(hok_reapply, hok_reapply_fn);
+
+static int hok_resume(struct device *dev)
+{
+	bool written;
+
+	mutex_lock(&hok_lock);
+	written = hok.zones_written || hok.backlight_written;
+	mutex_unlock(&hok_lock);
+
+	/* Freezable, so a work still pending at the next suspend waits until after it. */
+	if (written)
+		mod_delayed_work(system_freezable_wq, &hok_reapply,
+				 msecs_to_jiffies(HOK_RESUME_DELAY_MS));
+	return 0;
+}
+
+static const struct dev_pm_ops hok_pm_ops = {
+	.resume = hok_resume,
+	.restore = hok_resume,
+};
+
 static struct platform_driver hok_driver = {
 	.driver = {
 		.name = HOK_NAME,
+		.pm = pm_sleep_ptr(&hok_pm_ops),
 		.suppress_bind_attrs = true,
 	},
 };
@@ -281,9 +478,32 @@ err_driver:
 	return ret;
 }
 
+/* The budget does not apply here: it guards against runaway writers, not against this one write. */
+static void __exit hok_restore_boot_colors(void)
+{
+	struct hok_rgb zones[HOK_ZONES];
+	int ret;
+
+	hok_table_get_zones(hok.boot_table, zones);
+	hok_wait_interval();
+	ret = hok_set_zones(zones);
+	if (ret)
+		pr_warn("restoring the boot colors failed (%d)\n", ret);
+	else
+		pr_info("restored the boot colors\n");
+}
+
 static void __exit hok_exit(void)
 {
+	/* In this order: no store or resume can start once the device is gone. */
 	platform_device_unregister(hok.pdev);
+	cancel_delayed_work_sync(&hok_reapply);
+
+	mutex_lock(&hok_lock);
+	if (hok.zones_written && restore_on_unload)
+		hok_restore_boot_colors();
+	mutex_unlock(&hok_lock);
+
 	platform_driver_unregister(&hok_driver);
 }
 

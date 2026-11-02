@@ -1,0 +1,13 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: SET_RET_5
+# A SET the firmware refuses reaches the writer as an errno and counts against the budget. Nothing
+# was written, so the cache keeps its colors and unload has nothing to restore.
+load readonly=0
+write zones 112233 445566 778899 AABBCC\n
+info last_error
+info writes_total
+info writes_last_hour
+read zones
+unload
+kmsg restor
+kmsg-clean

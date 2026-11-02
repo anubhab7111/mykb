@@ -5,6 +5,10 @@
  * whether the module is compatible with the real firmware; that is step 1 of
  * docs/hardware-validation.md.
  *
+ * Each call must have the exact shape the firmware calls in the P3 plan list:
+ * instance, method id, request size, data size. Anything else gets code 6, which
+ * no test expects, so a call the module gets wrong fails the scenario.
+ *
  * iasl -D picks a variant: KBD_TYPE_3, KBD_TYPE_0, KBD_RET_3, SHORT_GET,
  * SET_RET_5 or HEADER_DRIFT. tests/vm/run.sh loads the one a scenario names.
  */
@@ -92,6 +96,7 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
             CreateDWordField (Arg2, 0, SIGN)
             CreateDWordField (Arg2, 4, COMD)
             CreateDWordField (Arg2, 8, QERY)
+            CreateDWordField (Arg2, 12, DSIZ)
             CreateByteField (Arg2, 16, DAT0)
 
             If (SIGN != 0x55434553)
@@ -99,8 +104,18 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
                 Return (RCOD (2))
             }
 
+            If ((Arg0 != 0) || (SizeOf (Arg2) != 144))
+            {
+                Return (RCOD (6))
+            }
+
             If ((COMD == 0x00020008) && (QERY == 0x2B))
             {
+                If ((Arg1 != 2) || (DSIZ != 1))
+                {
+                    Return (RCOD (6))
+                }
+
                 Return (RDAT (KRET, Mid (ToBuffer (KTYP), 0, 1)))
             }
 
@@ -111,6 +126,11 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
 
             If (QERY == 0x02)
             {
+                If ((Arg1 != 3) || (DSIZ != 128))
+                {
+                    Return (RCOD (6))
+                }
+
 #ifdef SHORT_GET
                 Return (Buffer (4) {})
 #else
@@ -120,6 +140,11 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
 
             If (QERY == 0x03)
             {
+                If ((Arg1 != 3) || (DSIZ != 128))
+                {
+                    Return (RCOD (6))
+                }
+
                 If (SRET == 0)
                 {
                     TABL = Mid (Arg2, 16, 128)
@@ -133,11 +158,21 @@ DefinitionBlock ("", "SSDT", 2, "OMENKB", "HPBIOSEM", 1)
 
             If (QERY == 0x04)
             {
+                If ((Arg1 != 2) || (DSIZ != 4))
+                {
+                    Return (RCOD (6))
+                }
+
                 Return (RDAT (0, Mid (ToBuffer (BKLT), 0, 4)))
             }
 
             If (QERY == 0x05)
             {
+                If ((Arg1 != 2) || (DSIZ != 1) || ((DAT0 != 0xE4) && (DAT0 != 0x64)))
+                {
+                    Return (RCOD (6))
+                }
+
                 BKLT = DAT0
                 Return (RDAT (0, Mid (ToBuffer (BKLT), 0, 1)))
             }

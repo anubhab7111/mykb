@@ -1,0 +1,6 @@
+VM load: ok
+VM write zones: ok
+VM slow-write zones: ok
+VM slow-write backlight: ok
+VM slow-write zones: ok
+VM kmsg-clean: yes

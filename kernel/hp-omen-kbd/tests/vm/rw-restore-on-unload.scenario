@@ -1,0 +1,9 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# By default, unload puts the boot colors back.
+load readonly=0
+write zones 112233 445566 778899 AABBCC\n
+unload
+kmsg restored the boot colors
+load
+read zones
+kmsg-clean

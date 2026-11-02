@@ -1,0 +1,6 @@
+VM load: ok
+VM info min_interval_ms=33
+VM unload: ok
+VM load: ok
+VM info min_interval_ms=1000
+VM kmsg-clean: yes

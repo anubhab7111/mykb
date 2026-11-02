@@ -1,0 +1,10 @@
+VM load: ok
+VM write zones: EINVAL
+VM write zones: EINVAL
+VM write zones: ok
+VM read zones: FF0000 00FF00 0000FF FFFFFF
+VM write zones: ok
+VM read zones: 40E0D0 40E0D0 40E0D0 40E0D0
+VM write backlight: EINVAL
+VM info writes_total=2
+VM kmsg-clean: yes

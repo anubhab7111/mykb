@@ -1,0 +1,14 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# After a resume, what was written goes back to the firmware: the zones and the backlight, one SET
+# each.
+load readonly=0
+write zones 112233 445566 778899 AABBCC\n
+write backlight 0\n
+info writes_total
+suspend
+sleep 2000
+info writes_total
+info last_error
+read backlight
+read zones
+kmsg-clean
