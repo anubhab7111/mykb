@@ -1,0 +1,8 @@
+post_install() {
+	cat <<'EOF'
+==> To set the keyboard colors as your user, join the omen-kbd group and log in again:
+    sudo usermod -aG omen-kbd $USER
+==> hp_omen_kbd loads at the next boot, or now with:
+    sudo modprobe hp_omen_kbd
+EOF
+}

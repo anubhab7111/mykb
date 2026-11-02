@@ -1,0 +1,1 @@
+ACTION=="add|change", SUBSYSTEM=="platform", KERNEL=="hp-omen-kbd", RUN+="/usr/bin/chgrp omen-kbd /sys%p/zones /sys%p/backlight", RUN+="/usr/bin/chmod 0664 /sys%p/zones /sys%p/backlight"
