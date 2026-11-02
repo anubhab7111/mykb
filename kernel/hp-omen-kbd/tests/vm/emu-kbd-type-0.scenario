@@ -1,0 +1,6 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: KBD_TYPE_0
+# A board with no lit keyboard at all: the third gate refuses.
+load
+kmsg keyboard type
+kmsg-clean

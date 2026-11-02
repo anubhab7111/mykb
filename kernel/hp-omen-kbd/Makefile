@@ -2,9 +2,15 @@
 KDIR ?= /usr/lib/modules/$(shell uname -r)/build
 
 VM_GATE := gate-plain gate-board-no-wmi gate-board-substring gate-vendor-other
-VM_ALL := $(VM_GATE)
+VM_EMU := emu-basic emu-kbd-type-3 emu-kbd-type-0 emu-kbd-query-fails emu-short-reply
+VM_ALL := $(VM_GATE) $(VM_EMU)
 
-.PHONY: all check vmtest-gate vmtest clean
+SSDT_VARIANTS := KBD_TYPE_3 KBD_TYPE_0 KBD_RET_3 SHORT_GET SET_RET_5 HEADER_DRIFT
+ASL := tests/vm/hp-bios-wmi.asl
+OUT := tests/vm/out
+IASL := iasl -vs -vr -we
+
+.PHONY: all check ssdt vmtest-gate vmtest clean
 
 all:
 	$(MAKE) -C $(KDIR) M=$(CURDIR) modules
@@ -20,8 +26,17 @@ check:
 vmtest-gate: all
 	@fail=0; for s in $(VM_GATE); do tests/vm/run.sh $$s || fail=1; done; exit $$fail
 
-vmtest: all
+vmtest: all ssdt
 	@fail=0; for s in $(VM_ALL); do tests/vm/run.sh $$s || fail=1; done; exit $$fail
+
+# The firmware emulator, once as the default and once per variant.
+ssdt:
+	@command -v iasl >/dev/null || { echo "install acpica for the emulator scenarios" >&2; exit 1; }
+	@mkdir -p $(OUT)
+	@$(IASL) -p $(OUT)/hp-bios-wmi $(ASL) >$(OUT)/iasl.log
+	@for v in $(SSDT_VARIANTS); do \
+		$(IASL) -p $(OUT)/hp-bios-wmi-$$v -D $$v $(ASL) >>$(OUT)/iasl.log || exit 1; \
+	done
 
 clean:
 	$(MAKE) -C $(KDIR) M=$(CURDIR) clean
