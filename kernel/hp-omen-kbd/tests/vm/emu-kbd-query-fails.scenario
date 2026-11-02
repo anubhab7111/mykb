@@ -1,0 +1,7 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: KBD_RET_3
+# The firmware does not know the keyboard-type query: the load is refused as ENODEV, whatever the
+# query's own errno was.
+load
+kmsg keyboard type
+kmsg-clean

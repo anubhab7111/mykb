@@ -46,7 +46,12 @@ cp "$scenario" "$work/root/scenario"
 bsdtar -c --format=newc -f "$work/initramfs.cpio" -C "$work/root" .
 
 read -r -a extra <<<"$(sed -n 's/^# qemu: //p' "$scenario")"
-extra=("${extra[@]//@SSDT@/$out/hp-bios-wmi.aml}")
+variant=$(sed -n 's/^# ssdt: //p' "$scenario")
+ssdt=$out/hp-bios-wmi${variant:+-$variant}.aml
+if [[ "${extra[*]}" == *@SSDT@* ]] && [ ! -f "$ssdt" ]; then
+	refuse "$ssdt is not built (make vmtest builds it)"
+fi
+extra=("${extra[@]//@SSDT@/$ssdt}")
 
 qemu_status=0
 timeout 120 qemu-system-x86_64 -enable-kvm -cpu host -m 256 -nographic -no-reboot \

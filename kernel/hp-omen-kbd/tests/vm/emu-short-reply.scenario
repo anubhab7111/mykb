@@ -1,0 +1,5 @@
+# qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
+# ssdt: SHORT_GET
+# The color table reply is too short to hold even its header: the load fails with that errno.
+load
+kmsg-clean
