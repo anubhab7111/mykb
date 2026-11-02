@@ -1,0 +1,3 @@
+VM load: ENODEV
+VM kmsg: hp_omen_kbd: board not on the allowlist (only HP 8A4E)
+VM kmsg-clean: yes

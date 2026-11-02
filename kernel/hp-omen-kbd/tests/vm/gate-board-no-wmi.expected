@@ -1,0 +1,3 @@
+VM load: ENODEV
+VM kmsg: hp_omen_kbd: HP BIOS WMI interface 5FB7F034-2C63-45E9-BE91-3D44E2C707E4 not found
+VM kmsg-clean: yes
