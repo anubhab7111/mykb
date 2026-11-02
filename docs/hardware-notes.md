@@ -45,3 +45,17 @@ Facts recorded on the real machine, for the hardware validation phase (P4) and l
 - [ ] Fn backlight key: does stock hp-wmi emit any input event (`libinput debug-events` / `wev`)? Not yet
       tested → the daemon uses the designed fallback (probe `backlight` every 3 s only while an effect is
       wanted).
+
+## P4 results
+
+The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. The machine was on kernel
+7.2.14-arch1-1 when the module was last tested in the VM (2026-11-02).
+
+- [ ] Step 1, load read-only: `kbd_type` = , `backlight_raw` = , zones match the baseline: ; table:
+- [ ] Step 2, same colors written back: header unchanged:
+- [ ] Step 3, physical zones: hardware 0 = , 1 = , 2 = , 3 =
+- [ ] Step 4, backlight: `backlight_raw` at each Fn level: ; writing colors while off turns it on:
+- [ ] Step 5, suspend twice: ; colors survive with nothing to re-apply:
+- [ ] Step 6, cold boot: shown before login: ; `zones` after login:
+- [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; default frame rate picked:
+- [ ] Step 8, unload: boot colors restored:

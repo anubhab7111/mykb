@@ -16,8 +16,8 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 | Part | State |
 |---|---|
 | Daemon, CLI, Waybar stream, Hyprland hook, `doctor` | Done. Tested against a mock backend and fake sysfs trees (GoogleTest, ASan + UBSan). |
-| Kernel module `hp_omen_kbd` | **Not written yet** (next phase). The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
-| Hardware validation | After the module, one approved step at a time (see the spec). |
+| Kernel module `hp_omen_kbd` | Written, and tested in a VM against a firmware emulator. **Not yet loaded on the real laptop.** The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
+| Hardware validation | Next, one approved step at a time: `docs/hardware-validation.md`. |
 
 ## Safety
 
@@ -29,7 +29,8 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 - A static profile costs zero writes. Effects are opt-in (`[effects] enabled = false`) and pause on
   battery, idle, lock and Fn-off.
 - `off` switches the firmware backlight off and never writes black into the zones.
-- Tests and the demo use the mock backend. Nothing in this repo writes under `/sys`.
+- The daemon's tests and the demo use the mock backend, and the module's tests run it inside a VM.
+  None of them touch the keyboard or write under this machine's `/sys`.
 
 ## Build and install
 
@@ -121,6 +122,36 @@ omen-kbd never edits these files itself.
 
 `omen-kbd doctor` lists what is still missing.
 
+## Kernel module (P3)
+
+`kernel/hp-omen-kbd/` is a small out-of-tree module that bridges sysfs to the firmware's color table.
+`core.c` holds every decision and also compiles into userspace tests; `main.c` adds what needs the
+kernel. It loads only on board 8A4E, with the HP BIOS WMI interface, and with a four-zone keyboard.
+Anywhere else it returns `ENODEV`. Nothing loads it automatically until the package is installed.
+
+**The module is never loaded on this machine before P4.** Do not run `insmod`, `modprobe` or
+`dkms install` on it. The tests below load it only inside QEMU, which boots this machine's own kernel
+with an ACPI table standing in for HP's firmware. That checks the module's logic and how it behaves in
+the kernel. Whether the real firmware agrees is what P4 is for.
+
+Arch packages: `base-devel linux-headers qemu-system-x86 acpica libarchive dkms namcap`.
+
+```bash
+make -C kernel/hp-omen-kbd                    # build against the running kernel
+make -C kernel/hp-omen-kbd check              # W=1 with -Werror, checkpatch --strict, module checks
+make -C kernel/hp-omen-kbd vmtest-gate        # the load gate, in a VM; no acpica needed
+make -C kernel/hp-omen-kbd vmtest             # every scenario, against the firmware emulator
+kernel/hp-omen-kbd/tests/check-packaging.sh   # DKMS and the Arch package, built as you, nothing installed
+```
+
+`kernel/hp-omen-kbd/tests/vm/run.sh <scenario>` runs one scenario and keeps its console output in
+`tests/vm/out/<scenario>/console.log`. A scenario lists commands (`load`, `write`, `suspend`, …), and
+its `.expected` file lists exactly what they must print. After a kernel update without a reboot,
+`run.sh` refuses to run, because the VM would test another kernel than the running one.
+
+- Loading it on the hardware, one approved step at a time: `docs/hardware-validation.md`.
+- If something goes wrong: `docs/recovery.md`.
+
 ## Development
 
 - Debug build and tests, with AddressSanitizer and UndefinedBehaviorSanitizer:
@@ -143,6 +174,8 @@ omen-kbd never edits these files itself.
   - `src/sources`: Hyprland, theme, hwmon, system D-Bus.
   - `src/ipc`, `src/cli`: socket protocol and command line.
   - `tests/`: GoogleTest.
+  - `kernel/hp-omen-kbd`: the module, its core tests and the VM scenarios.
+  - `packaging/`: service unit, config example, snippets, udev rule, sysusers, PKGBUILD.
 - The Rust prototype this port follows is kept at the git tag `rust-prototype`.
 
 ## Documents
@@ -150,4 +183,6 @@ omen-kbd never edits these files itself.
 - Design spec (bugs found in omen-space, alternatives, design, phases):
   `docs/superpowers/specs/2026-10-21-omen-kbd-design.md`
 - Hardware notes for this laptop: `docs/hardware-notes.md`
+- Hardware validation runbook (P4): `docs/hardware-validation.md`
+- Recovery: `docs/recovery.md`
 - Implementation plans: `docs/superpowers/plans/`
