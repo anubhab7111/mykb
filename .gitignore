@@ -1,4 +1,5 @@
 /build
+/build-release
 # kbuild outputs of the kernel module
 /kernel/hp-omen-kbd/*.o
 /kernel/hp-omen-kbd/*.ko
