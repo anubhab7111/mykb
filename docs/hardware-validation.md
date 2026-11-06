@@ -31,6 +31,13 @@ So neither one shows what a SET did to the table. **A reload does:** it reads th
 firmware and logs all 128 bytes. The steps below compare those lines with the ones from step 1. The
 module is loaded with `restore_on_unload=0` for this, so the unload writes nothing.
 
+Step 0 found how far that goes on this BIOS (BIOS F.21; details in `docs/hardware-notes.md`):
+
+- The firmware keeps the colors and the backlight byte in BIOS memory.
+- A SET stores bytes 25–36 there and raises a flag. Code outside ACPI applies the flag later.
+- So a reload shows what BIOS memory holds, not what the LEDs show. **Only your eyes show that a write
+  was applied**, and the light can follow the call by a moment.
+
 ## Before you start
 
 Run these from the repository root, on the kernel you will test. After a kernel update, run them
@@ -107,6 +114,16 @@ sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 > ~/omen-kbd-p4/tabl
   hp_omen_kbd: table 00000000: <16 bytes>
   ... 8 table lines in all ...
   ```
+- The table, as step 0 predicts:
+  - byte 0 is `03`;
+  - bytes 25–36 are the zone colors, red-green-blue per zone, starting 9 bytes into line `00000010`;
+  - every other byte is `00`.
+
+  With the baseline colors, lines 2 and 3 read:
+  ```
+  hp_omen_kbd: table 00000010: 00 00 00 00 00 00 00 00 00 40 e0 d0 40 e0 d0 40
+  hp_omen_kbd: table 00000020: e0 d0 00 99 ed 00 00 00 00 00 00 00 00 00 00 00
+  ```
 - `zones` reads `40E0D0 40E0D0 40E0D0 0099ED` and `backlight` reads `1`: the P1 baseline.
 - `info` shows `board=8A4E`, `kbd_type` 1 or 2, `readonly=1`, `writes_total=0`, `last_error=0`.
 - The keyboard does not change.
@@ -127,6 +144,8 @@ documents), and whether the zones match the baseline.
 - `insmod` fails with `Input/output error` or `Operation not supported`: a read the old driver did
   fine fails now. `color table reads as all ...; refusing it` in `dmesg` means the firmware answered
   with a table of all `00` or all `ff`.
+- A table byte other than 0 and 25–36 is not `00`, or byte 0 is not `03`: the reply did not come from
+  the code step 0 read.
 - `zones` differs from the baseline **and** from what you see on the keyboard. If it differs from the
   baseline but matches the keyboard, the firmware changed the colors at some boot; record that and go
   on. The steps below use the colors saved above, not the baseline.
@@ -177,7 +196,8 @@ echo "000000 000000 000000 FFFFFF" | sudo tee $D/zones   # hardware 3, white
 sudo tee $D/zones < ~/omen-kbd-p4/colors
 ```
 
-Run them one at a time, and look at the keyboard after each. Then compare the table again. The colors
+Run them one at a time. After each, wait a second (the firmware applies a write after the call
+returns), then look at the keyboard. Then compare the table again. The colors
 are back to what they were, so all 128 bytes must match:
 
 ```bash
@@ -225,6 +245,10 @@ cat $D/backlight $D/info
 
 **Record:** `backlight_raw` at each level, and whether `backlight` matched what you saw.
 
+A read returns a byte the firmware keeps in BIOS memory, which a WMI backlight set writes. If
+`backlight_raw` does not follow the Fn key, the Fn key does not update that byte. That is a finding,
+not a stop: the daemon then cannot see Fn-key changes by reading `backlight`. Record it for P5.
+
 Next, check whether writing colors while the backlight is off turns it on:
 
 ```bash
@@ -251,7 +275,8 @@ sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 | diff ~/omen-kbd-p4
 - `echo 0` reports `Input/output error` or `Operation not supported`. The SET's shape is wrong for
   this BIOS. The Fn key still works; the fix is a reviewed code change.
 - The colors differ after turning the backlight back on, or `diff` prints anything.
-- `backlight` disagrees with the keyboard at any Fn level: the bit-7 decode is wrong.
+- `backlight` disagrees with the keyboard right after `echo 0` or `echo 1`: the bit-7 decode is wrong.
+  At Fn levels, a mismatch is recorded, not a stop (see above).
 - A new kernel error.
 
 ## Step 5: suspend and resume
@@ -339,12 +364,18 @@ cat $D/zones > ~/omen-kbd-p4/colors-step7
 sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 > ~/omen-kbd-p4/table-step7
 cat $D/info                               # note writes_total
 
+# SMI count (MSR 0x34): 60 s with no writes, for comparison
+sudo dd if=/dev/cpu/0/msr bs=8 count=1 skip=52 iflag=skip_bytes status=none | od -An -tu8
+sleep 60
+sudo dd if=/dev/cpu/0/msr bs=8 count=1 skip=52 iflag=skip_bytes status=none | od -An -tu8
+
 # 5 writes per second for 60 s
 time sudo bash -c 'for i in $(seq 150); do
     echo "40E0D0 40E0D0 40E0D0 0099ED" >/sys/devices/platform/hp-omen-kbd/zones; sleep 0.2
     echo "0099ED 0099ED 0099ED 40E0D0" >/sys/devices/platform/hp-omen-kbd/zones; sleep 0.2
 done'
 cat $D/info
+sudo dd if=/dev/cpu/0/msr bs=8 count=1 skip=52 iflag=skip_bytes status=none | od -An -tu8
 
 # 10 writes per second for 60 s
 time sudo bash -c 'for i in $(seq 300); do
@@ -352,6 +383,7 @@ time sudo bash -c 'for i in $(seq 300); do
     echo "0099ED 0099ED 0099ED 40E0D0" >/sys/devices/platform/hp-omen-kbd/zones; sleep 0.1
 done'
 cat $D/info
+sudo dd if=/dev/cpu/0/msr bs=8 count=1 skip=52 iflag=skip_bytes status=none | od -An -tu8
 
 # All those writes must have left the rest of the table alone
 sudo tee $D/zones < ~/omen-kbd-p4/colors-step7
@@ -360,14 +392,21 @@ sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
 sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 | diff ~/omen-kbd-p4/table-step7 -
 ```
 
-A write runs the firmware call in the writer's context, so the `user` and `sys` times from `time` hold
-most of the cost. For a view of the whole machine while a loop runs, install `sysstat` and run
-`pidstat 5 12` in a third terminal.
+The ACPI part of a write is cheap: step 0 found it only stores bytes in memory. The real work is done
+later, outside ACPI, so `time` cannot see it. The SMI counter can:
+
+- If it grows with the write rate, compared with the idle minute, each write costs a System Management
+  Interrupt. Every CPU stops for one, so this is the number that picks the frame rate.
+- If it does not grow, the firmware polls the flag, and writes faster than its poll merge into one.
+
+For a view of the whole machine while a loop runs, install `sysstat` and run `pidstat 5 12` in a third
+terminal.
 
 **Expected:** `last_error=0`, a `writes_total` that grew by about 300 and then 600, and `diff` printing
 nothing.
 
-**Record:** `real`, `user` and `sys` for both rates, the `writes_total` growth, any flicker, and how the
+**Record:** the SMI count growth for the idle minute and both rates, `real`, `user` and `sys` for both
+rates, the `writes_total` growth, any flicker, and how the
 machine felt (input lag, audio dropouts). Then pick the default frame rate.
 
 **Stop if:** `last_error` is not 0, `diff` prints anything, the machine stutters, or a new kernel error.

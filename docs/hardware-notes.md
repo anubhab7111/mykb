@@ -51,7 +51,36 @@ Facts recorded on the real machine, for the hardware validation phase (P4) and l
 The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. The machine was on kernel
 7.2.14-arch1-1 when the module was last tested in the VM (2026-11-02).
 
-- [ ] Step 0, firmware code (optional): reply sizes per method: ; `Serialized`: ; `0x20008/0x2B` reaches:
+- [x] Step 0, firmware code (2026-11-06, BIOS F.21, `acpidump` + `iasl -d`): **passed, nothing to change
+      in the module.** `WMAA` is in the DSDT only. `ssdt4` and `ssdt8` did not decompile (duplicate
+      names), but neither contains `WMAA`, `HWMC` or any lighting field.
+  - **Reply sizes:** `WMAA` → `HWMC` always returns 8 + N bytes, with N set by the method id alone: 0, 4,
+    128, 1024, 4096 for methods 1–5. A handler whose payload is larger than N gets return code 5.
+    The module asks for method 2 (12 bytes) for the keyboard type and both backlight calls, and method 3
+    (136 bytes) for both color table calls. Every reply is at least as long as the module expects.
+  - **Serialized:** yes, and it also holds the `MUTZ` mutex. Nothing else calls `HWMC`.
+  - **`0x20008`/`0x2B`** reaches `GM2B`, plain ACPI code with no SMI. It reads the EC byte `KBT0`:
+    - 0 → type 0;
+    - 1 → type 3 (per-key; the module refuses it);
+    - 2 → type 2 or 1, chosen by a GPIO (numpad).
+    So step 1 loads only if the EC reports 2.
+  - **Color GET (`0x20009`/2)** builds the table on the fly: byte 0 = `03`, bytes 25–36 = the 12 color
+    bytes kept in BIOS memory (`LRGB`), every other byte 0. The header can never drift, and the table can
+    never be all `00` or all `ff`.
+  - **Color SET (`0x20009`/3)** reads only bytes 25–36 of the input. It stores them in two BIOS memory
+    copies (`LRGB`, `BRGB`) and sets a "lighting changed" flag (`LCMC`). All of these sit in a
+    `SystemMemory` region, and no ACPI code reads the flag or `BRGB`: something outside ACPI (SMM or the
+    EC) applies the colors later. So a success code means accepted, not lit. The reply has no data; the
+    module discards its 128 zero bytes.
+  - **Backlight GET (`0x20009`/4)** returns `LBRT`, a byte in BIOS memory. **Backlight SET
+    (`0x20009`/5)** stores the input byte in `LBRT` unchecked and sets the same flag. The module only
+    ever sends `0xE4`/`0x64`. Whether the Fn key updates `LBRT` is unknown until step 4.
+  - **Consequences for the runbook:**
+    - A reload's table `diff` proves what BIOS memory holds, not what the LEDs show. Only the eye proves
+      a write was applied.
+    - Step 7's `time` cannot see the cost, because that lives in the code that consumes the flag. The
+      SMI counter (MSR `0x34`) can.
+    - Whether `BRGB` reaches flash is what step 6 answers.
 - [ ] Step 1, load read-only: `kbd_type` = , `backlight_raw` = , zones match the baseline: ; table:
 - [ ] Step 2, same colors written back: table unchanged after a reload:
 - [ ] Step 3, physical zones: hardware 0 = , 1 = , 2 = , 3 = ; table unchanged after a reload:
