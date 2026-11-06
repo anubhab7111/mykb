@@ -41,7 +41,9 @@ Facts recorded on the real machine, for the hardware validation phase (P4) and l
 - [x] Colors shown **before login** after this warm reboot, with nothing writing colors: **the last colors**
       (turquoise L/M/R, blue WASD). The firmware retains colors across a warm reboot; the EC may stay
       powered during a warm reboot, so this does not yet prove non-volatile storage.
-- [ ] Colors shown before login after a **full power-off**: not yet tested (do it before P4, or as P4 step 6).
+- [~] Colors shown before login after a **full power-off**: after a *total power loss* (P4 step 6,
+      dead battery) the firmware comes up with `0F84FA 710FFA F9350F FAAC0F`. A normal power-off with a
+      healthy battery is still untested.
 - [ ] Fn backlight key: does stock hp-wmi emit any input event (`libinput debug-events` / `wev`)? Not yet
       tested → the daemon uses the designed fallback (probe `backlight` every 3 s only while an effect is
       wanted).
@@ -151,7 +153,24 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
   - **Settled by the user:** Hyprland hanging after a wake happened before the module existed. It is a
     known problem of this machine, not the module's; no control suspend was run. To keep a hang from
     taking the terminal down, the rest of step 5 runs from a TTY.
-- [ ] Step 6, cold boot: shown before login: ; `zones` after login:
+- [x] Step 6, cold boot (2026-11-06): **done, as a total power loss.**
+  - **What happened:** the module wrote `FF00FF 00FFFF FF00FF 00FFFF`, then `poweroff`, then the
+    charger was unplugged for 30 s. The battery turned out to be dead (see below), so this cut all
+    power.
+  - **Evidence:** the next boot showed a CMOS error, and the kernel read the RTC as 2022-01-01.
+    Secure Boot stayed off, the boot order was unchanged, and the clock re-synced over NTP.
+  - **Result: the colors did not survive.** The keyboard changed (user-confirmed). After login the
+    firmware read `0F84FA 710FFA F9350F FAAC0F`, `backlight_raw=0x80`, and a table identical to step 1's.
+  - **So `0F84FA 710FFA F9350F FAAC0F` with `0x80` is the firmware's state after a power loss.** That
+    is where step 1's colors came from: the journal's unlogged boot ends since 2026-10-31 match charger
+    unplugs with a dead battery.
+  - **Still open:** a normal power-off with a healthy battery, with the EC kept powered. A total power
+    loss also cannot tell "kept only in powered memory" from "stored, but reset when the BIOS loaded
+    defaults after the CMOS error". Nothing so far shows colors being written to flash. Repeat this
+    step after the battery is replaced.
+  - **Battery (not P4's doing; found here):** BAT0 reads 2.74 V against an 11.58 V design minimum, and
+    "Not charging". It holds 42 of 83 Wh after 132 cycles. UPower already had it at 3.14 V and
+    "pending-charge" on 2026-10-31. Until it is replaced, unplugging the charger is a hard power cut.
 - [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; table unchanged after a reload: ; default frame rate
       picked:
 - [ ] Step 8, unload: boot colors restored:
