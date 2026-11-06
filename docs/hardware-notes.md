@@ -144,7 +144,9 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
     - No ACPI error near either wake.
   - **Against:** two `systemctl suspend`s on 2026-11-03, without the module, came back fine with no
     NVRM message.
-  - A suspend with the module unloaded settles it.
+  - **Settled by the user:** Hyprland hanging after a wake happened before the module existed. It is a
+    known problem of this machine, not the module's; no control suspend was run. To keep a hang from
+    taking the terminal down, the rest of step 5 runs from a TTY.
 - [ ] Step 6, cold boot: shown before login: ; `zones` after login:
 - [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; table unchanged after a reload: ; default frame rate
       picked:
