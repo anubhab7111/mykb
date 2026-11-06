@@ -76,6 +76,12 @@ class Daemon {
         std::uint64_t client;
         TimePoint deadline;
     };
+    /// A request answered only after a fresh backlight read (the Fn key may have changed it).
+    struct ProbeWaiter {
+        std::uint64_t client;
+        Request request;
+        TimePoint deadline;
+    };
 
     std::optional<std::uint64_t> recompute();
     [[nodiscard]] Status status() const {
@@ -89,7 +95,10 @@ class Daemon {
     void on_client(std::uint64_t id, std::uint32_t events);
     void service(std::uint64_t id);
     void handle_line(std::uint64_t id, Client &c, const std::string &line);
-    void on_request(std::uint64_t id, Client &c, const Request &r);
+    /// `backlight_read`: the fresh backlight read this request waits for has happened (or timed
+    /// out), so it is handled now.
+    void on_request(std::uint64_t id, Client &c, const Request &r, bool backlight_read = false);
+    void release_probe_waiters();
     void respond(std::uint64_t id, const Response &r);
     void close_client(std::uint64_t id);
 
@@ -117,6 +126,11 @@ class Daemon {
     std::optional<Output> last_output_;
     std::optional<Status> last_status_;
     std::vector<Pending> pending_;
+    std::vector<ProbeWaiter> awaiting_probe_;
+    /// The newest generation the writer reported on, and the newest job that writes the
+    /// backlight: a read taken before that job landed may show the old state, so it is dropped.
+    std::uint64_t completed_generation_ = 0;
+    std::uint64_t backlight_generation_ = 0;
     std::optional<TimePoint> save_at_;
     std::optional<TimePoint> next_tick_;
     std::optional<TimePoint> next_probe_;

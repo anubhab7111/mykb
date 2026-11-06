@@ -33,6 +33,16 @@ constexpr std::size_t kMaxOut = std::size_t{1024} * 1024;
 
 void warn(std::string_view msg) { std::println(stderr, "omen-kbd: warning: {}", msg); }
 
+/// Nothing polls the backlight while a static profile shows, so these read it first: after the
+/// Fn key, `status` must say off and one `toggle` must turn the light back on.
+bool needs_backlight_read(const Request &r) {
+    if (std::holds_alternative<req::Status>(r) || std::holds_alternative<req::Subscribe>(r)) {
+        return true;
+    }
+    const auto *p = std::get_if<req::Power>(&r);
+    return p != nullptr && p->action == req::PowerAction::Toggle;
+}
+
 /// Writes as much of `out` as the socket takes. False if the peer is gone.
 bool flush(int fd, std::string &out) {
     while (!out.empty()) {
@@ -75,6 +85,9 @@ int Daemon::run() {
     save();
     for (const Pending &p : std::exchange(pending_, {})) {
         respond(p.client, Response::failure("daemon shutting down"));
+    }
+    for (const ProbeWaiter &w : std::exchange(awaiting_probe_, {})) {
+        respond(w.client, Response::failure("daemon shutting down"));
     }
     for (auto &[id, c] : clients_) {
         flush(c.fd.get(), c.out);
@@ -133,6 +146,11 @@ std::optional<std::uint64_t> Daemon::recompute() {
         const std::pair key{out.backlight, hw};
         if (force_next_ || force_backlight_next_ || last_job_ != key) {
             ++generation_;
+            if (force_next_ || force_backlight_next_ || !last_job_ ||
+                last_job_->first != out.backlight) {
+                backlight_generation_ = generation_;
+                model_.forget_hw_backlight();
+            }
             writer_->submit(
                 WriteJob{generation_, out.backlight, hw, force_next_, force_backlight_next_});
             force_next_ = false;
@@ -292,7 +310,13 @@ void Daemon::handle_line(std::uint64_t id, Client &c, const std::string &line) {
     on_request(id, c, *r);
 }
 
-void Daemon::on_request(std::uint64_t id, Client &c, const Request &r) {
+void Daemon::on_request(std::uint64_t id, Client &c, const Request &r, bool backlight_read) {
+    if (!backlight_read && needs_backlight_read(r)) {
+        awaiting_probe_.push_back({id, r, Clock::now() + kReplyTimeout});
+        c.awaiting = true;
+        writer_->probe();
+        return;
+    }
     if (std::holds_alternative<req::Status>(r)) {
         respond(id, Response::success(status()));
         return;
@@ -369,6 +393,7 @@ void Daemon::close_client(std::uint64_t id) {
 void Daemon::on_writer() {
     for (WriterMsg &msg : writer_->drain()) {
         if (auto *o = std::get_if<WriteOutcome>(&msg)) {
+            completed_generation_ = std::max(completed_generation_, o->generation);
             model_.record_write(o->result);
             if (o->result && *o->result) {
                 schedule_save(kSaveCounterOnly);
@@ -395,12 +420,34 @@ void Daemon::on_writer() {
             }
         } else {
             const auto &probe = std::get<BacklightProbe>(msg);
+            if (completed_generation_ < backlight_generation_) {
+                // The writer reads before it takes a waiting job, so this read may predate our
+                // own backlight write; ask again (the job goes first now that the slot is busy).
+                if (!awaiting_probe_.empty()) {
+                    writer_->probe();
+                }
+                continue;
+            }
             if (probe.result) {
                 model_.set_hw_backlight(*probe.result);
                 recompute();
             }
-            // A failed probe is not actionable; the next one retries.
+            // A failed probe is not actionable: waiters go on with what the daemon knows, and
+            // the next periodic probe retries.
+            release_probe_waiters();
         }
+    }
+}
+
+void Daemon::release_probe_waiters() {
+    for (const ProbeWaiter &w : std::exchange(awaiting_probe_, {})) {
+        const auto it = clients_.find(w.client);
+        if (it == clients_.end()) {
+            continue; // the client left while waiting
+        }
+        it->second.awaiting = false;
+        on_request(w.client, it->second, w.request, true);
+        service(w.client);
     }
 }
 
@@ -416,6 +463,9 @@ std::optional<TimePoint> Daemon::next_wake() const {
     consider(save_at_);
     consider(next_probe_);
     for (const Pending &p : pending_) {
+        consider(p.deadline);
+    }
+    for (const ProbeWaiter &p : awaiting_probe_) {
         consider(p.deadline);
     }
     return w;
@@ -461,6 +511,11 @@ void Daemon::on_wake() {
     });
     for (const auto id : expired) {
         service(id);
+    }
+    // A read that never came back must not hold a client forever: answer from what is known.
+    if (std::ranges::any_of(awaiting_probe_,
+                            [&](const ProbeWaiter &p) { return due(p.deadline); })) {
+        release_probe_waiters();
     }
     if (due(next_tick_) || due(model_.hint_deadline())) {
         recompute();

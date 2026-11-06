@@ -115,7 +115,7 @@ std::expected<Change, std::string> Model::handle(const Request &r, TimePoint now
             persisted_.on = false;
             break;
         case req::PowerAction::Toggle:
-            persisted_.on = !persisted_.on;
+            persisted_.on = !user_on();
             break;
         }
         return Change::OutputAndPersist;
@@ -303,7 +303,7 @@ Status Model::status(const Output *out) const {
     s.effects_enabled = config_.effects.enabled;
     s.animated = out != nullptr && out->animated;
     s.brightness = persisted_.brightness;
-    s.on = persisted_.on;
+    s.on = user_on();
     s.backlight = out != nullptr ? out->backlight : backlight_wanted();
     if (out != nullptr) {
         for (std::size_t i = 0; i < 4; ++i) {
@@ -368,6 +368,13 @@ bool Model::backlight_wanted() const {
     const auto &g = config_.gates;
     return persisted_.on && !lid_closed_ && !(facts_.locked && g.on_lock == GateAction::Off) &&
            !(facts_.idle && g.on_idle == GateAction::Off);
+}
+
+bool Model::user_on() const {
+    if (hw_backlight_ && *hw_backlight_ != backlight_wanted()) {
+        return *hw_backlight_;
+    }
+    return persisted_.on;
 }
 
 std::optional<Rgb> Model::hint_color(std::vector<std::string> &warnings) const {
