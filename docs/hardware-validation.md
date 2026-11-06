@@ -371,7 +371,16 @@ sudo poweroff
 ```
 
 Unplug the charger, wait 30 seconds, plug it back in and start the machine. Look at the keyboard
-**before logging in**. After login, start `sudo dmesg -W` again in the second terminal, and read what
+**before logging in**.
+
+**Before you unplug, check the battery** (run this before `poweroff`):
+`cat /sys/class/power_supply/BAT0/capacity`.
+
+- If it reads 0, or the battery is dead, unplugging cuts all power, the EC's and the CMOS clock's
+  included. The next boot then reports a CMOS error and may load the BIOS defaults. In 2026-11 that is
+  what happened.
+- That tests a total power loss, not a normal power-off. With a dead battery, power on without
+  unplugging. After login, start `sudo dmesg -W` again in the second terminal, and read what
 the firmware has now:
 
 ```bash
