@@ -246,6 +246,84 @@ TEST_F(DaemonTest, OnAfterFnKeyOffWritesTheBacklight) {
     EXPECT_EQ(h().ops(), expected) << "one backlight write, no zone write";
 }
 
+// With a static profile nothing polls the backlight, so `status` and `toggle` read it on demand:
+// after the Fn key turns the light off, status says off and one toggle turns it back on.
+TEST_F(DaemonTest, StatusReadsTheBacklightAfterFnKeyOff) {
+    start(kStaticCfg);
+    h().set_hw_backlight(false); // the Fn key
+    EXPECT_FALSE(status().on);
+    h().set_hw_backlight(true); // and on again
+    EXPECT_TRUE(status().on);
+}
+
+TEST_F(DaemonTest, ToggleAfterFnKeyOffTurnsTheLightOnInOnePress) {
+    start(kStaticCfg);
+    h().set_hw_backlight(false); // the Fn key
+    auto expected = h().ops();
+    const Response r = req(req::Power{req::PowerAction::Toggle});
+    EXPECT_TRUE(r.ok) << r.error.value_or("");
+    expected.push_back(MockOp::backlight_op(true));
+    EXPECT_EQ(h().ops(), expected) << "one backlight write, no zone write";
+    EXPECT_TRUE(status().on);
+}
+
+TEST_F(DaemonTest, ToggleAfterFnKeyOnTurnsTheLightOffInOnePress) {
+    start(kStaticCfg);
+    ASSERT_TRUE(req(req::Power{req::PowerAction::Off}).ok);
+    h().set_hw_backlight(true); // the Fn key
+    EXPECT_TRUE(status().on);
+    auto expected = h().ops();
+    const Response r = req(req::Power{req::PowerAction::Toggle});
+    EXPECT_TRUE(r.ok) << r.error.value_or("");
+    expected.push_back(MockOp::backlight_op(false));
+    EXPECT_EQ(h().ops(), expected);
+    EXPECT_FALSE(status().on);
+}
+
+// Gates that switch the light off are the daemon's own doing, not the Fn key: status keeps the
+// user's on/off.
+TEST_F(DaemonTest, StatusKeepsOnWhileAGateHoldsTheLightOff) {
+    start(kStaticCfg);
+    ASSERT_TRUE(req(req::Flag{"locked", true}).ok); // default on_lock = off
+    EXPECT_FALSE(h().ops().back().on) << "the lock gate wrote the backlight off";
+    const Status s = status();
+    EXPECT_TRUE(s.on);
+    EXPECT_FALSE(s.backlight);
+}
+
+// The writer reads before it takes a waiting job, so a read can show the light as it was before
+// the daemon's own `off` landed. That read must not count as the Fn key turning it back on.
+TEST_F(DaemonTest, AReadTakenBeforeOurOwnOffIsNotTheFnKey) {
+    start(kStaticCfg);
+    h().set_delay(300ms);
+    auto slow = std::async(std::launch::async, [this] { return req(set({"#ff0000"})); });
+    std::this_thread::sleep_for(50ms); // the writer is inside the slow zone write
+    auto asked = std::async(std::launch::async, [this] {
+        return raw_exchange(encode(Request{req::Status{}}) + "\n", 1);
+    });
+    std::this_thread::sleep_for(50ms); // the status read waits behind the zone write
+    const Response off = req(req::Power{req::PowerAction::Off}); // queued behind that read
+    EXPECT_TRUE(off.ok) << off.error.value_or("");
+    EXPECT_TRUE(slow.get().ok);
+    const auto replies = asked.get();
+    ASSERT_EQ(replies.size(), 1u);
+    ASSERT_TRUE(replies[0].status.has_value());
+    EXPECT_FALSE(replies[0].status->on) << "the stale read said on; the light is off";
+    EXPECT_FALSE(status().on);
+}
+
+TEST_F(DaemonTest, ToggleTwiceIsAPlainOffThenOn) {
+    start(kStaticCfg);
+    auto expected = h().ops();
+    ASSERT_TRUE(req(req::Power{req::PowerAction::Toggle}).ok);
+    EXPECT_FALSE(status().on);
+    ASSERT_TRUE(req(req::Power{req::PowerAction::Toggle}).ok);
+    EXPECT_TRUE(status().on);
+    expected.push_back(MockOp::backlight_op(false));
+    expected.push_back(MockOp::backlight_op(true));
+    EXPECT_EQ(h().ops(), expected);
+}
+
 TEST_F(DaemonTest, EffectTicksAtConfiguredFps) {
     start(kWaveCfg);
     std::this_thread::sleep_for(300ms);

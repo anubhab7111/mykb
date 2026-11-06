@@ -67,6 +67,8 @@ class Model {
     void set_submap(std::optional<std::string> name);
     /// What the firmware reports (e.g. after the Fn backlight key).
     void set_hw_backlight(bool on) { hw_backlight_ = on; }
+    /// The daemon is writing the backlight itself: what was read before no longer holds.
+    void forget_hw_backlight() { hw_backlight_.reset(); }
     void add_warning(std::string w);
     /// Records a writer outcome; `true` = zones were written.
     void record_write(const std::expected<bool, BackendError> &r);
@@ -91,6 +93,9 @@ class Model {
     [[nodiscard]] bool animation_allowed() const;
     [[nodiscard]] std::uint8_t effective_brightness(const RuleOutcome &rules) const;
     [[nodiscard]] bool backlight_wanted() const;
+    /// The user's on/off: the persisted one, unless the firmware last reported the opposite of
+    /// what the daemon wants, which only the Fn key does.
+    [[nodiscard]] bool user_on() const;
     std::optional<Rgb> hint_color(std::vector<std::string> &warnings) const;
     Rgb resolve(const ColorRef &c, std::vector<std::string> &warnings) const;
     std::tuple<Frame, Effect, std::uint8_t> profile_look(const std::string &name,
