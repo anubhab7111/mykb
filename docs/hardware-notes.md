@@ -126,7 +126,11 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
   - **Writing colors while the light is off leaves it off** (user-confirmed; `backlight` still read
     `0`). The daemon can repaint while off without turning the light on.
   - After a reload, the table equals step 1's.
-- [ ] Step 5, suspend (2026-11-06): **not finished.**
+- [x] Step 5, suspend (2026-11-06): **passed.**
+  - **Final run, from a TTY (5a):** three wakes. `writes_total` went 2 → 4 → 6 → 8, two SETs (zones and
+    backlight) per wake, with `last_error=0` throughout. The kernel log was clean apart from the known
+    `_Q33` group, which came exactly 1,800 s after the previous one. No NVIDIA error this time.
+  - Earlier notes from the first attempt follow.
   - **Colors survived both wakes**, user-confirmed: one with the module's re-apply (5a), and one with
     the module loaded `readonly=1` and nothing to re-apply (5b, `writes_total=0`). So the firmware
     keeps colors across `s2idle` on its own.
