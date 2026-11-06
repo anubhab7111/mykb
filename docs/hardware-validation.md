@@ -500,5 +500,6 @@ sudo rmmod hp_omen_kbd
 ## Sign-off
 
 After all eight steps pass, a reviewed commit flips the default of `readonly` to 0. Only then does P5
-install the package. If you stopped at any step, the module stays out of autoload and nothing about
+install the package. That happened on 2026-11-06 (BIOS F.21); results are in `docs/hardware-notes.md`.
+Every command in this runbook names `readonly` explicitly, so it reads the same before and after. If you stopped at any step, the module stays out of autoload and nothing about
 your system has changed: a reboot leaves no trace of it apart from colors the firmware kept.
