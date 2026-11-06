@@ -107,6 +107,13 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
     0 = right, 1 = middle, 2 = left, 3 = WASD. The zone map in `config.toml` needs no change.
   - After the colors were put back and the module reloaded, the table equals step 1's.
   - Both loads printed `restore_on_unload` = `N`.
+- Between steps 3 and 4 (2026-11-06 21:58), `dmesg -W` showed `ACPI Error`s in `EC0._Q33`. **Not
+  ours:**
+  - `_Q33` is the EC asking for the RTC time. It reads CMOS region `CMS0`, which has no Linux handler.
+  - The journal has it every 30 minutes (e.g. 05:35, 06:05, … on 2026-11-03), and on boots before the
+    module existed (14 times on 2026-10-21).
+  - This one came 70 s after the last module call, a read.
+  - The runbook now lists it as the one known exception.
 - [ ] Step 4, backlight: `backlight_raw` off/on: ; at each Fn level: ; writing colors while off turns it
       on: ; table unchanged after a reload:
 - [ ] Step 5, suspend twice: ; colors survive with nothing to re-apply:

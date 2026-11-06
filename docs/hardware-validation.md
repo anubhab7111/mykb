@@ -60,6 +60,19 @@ boot, and those are not yours to worry about. Below, "a new kernel error" means 
 terminal containing `BUG:`, `Oops`, `WARNING:`, `ACPI Error` or `ACPI BIOS Error`. It is a stop
 condition in every step.
 
+**One exception.** About every 30 minutes, and sometimes after a wake, the EC asks the OS for the
+time. Its handler, `EC0._Q33`, reads the clock from CMOS (region `CMS0`), and Linux has no handler for
+that region. So this group of lines is not yours, and not a stop:
+
+```
+ACPI Error: No handler for Region [CMS0] (...) [SystemCMOS] (...)
+ACPI Error: Region SystemCMOS (ID=5) has no handler (...)
+ACPI Error: Aborting method \_SB.PC00.LPCB.EC0._Q33 due to previous error (AE_NOT_EXIST) (...)
+```
+
+It was logged on boots long before the module existed. Any other `ACPI Error`, or one naming another
+method, still stops you.
+
 **Paste each `insmod` line as one line.** In step 2 a pasted line arrived split in two, so
 `restore_on_unload=0` ran as a shell variable and the module kept its default. So every load that needs
 `restore_on_unload=0` is followed by a line that prints the value the module got. If that line prints
