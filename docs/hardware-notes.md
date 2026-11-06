@@ -92,7 +92,15 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
     several unlogged ends (crash or hard power-off), and Windows is installed (OMEN Gaming Hub could
     have set them). Step 6 decides whether a power-off resets the colors.
   - No "taints kernel" lines: the NVIDIA DKMS modules had already tainted the kernel (`OE`).
-- [ ] Step 2, same colors written back: table unchanged after a reload:
+- [x] Step 2, same colors written back (2026-11-06): **passed.**
+  - The first SET was accepted: `writes_total=1`, `last_error=0`, `header_changed=0`. The keyboard did
+    not change.
+  - After a reload, the table equals step 1's byte for byte.
+  - Both `insmod` lines arrived split when pasted, so `restore_on_unload=0` never reached the module.
+    The first unload therefore wrote the boot colors back (`restored the boot colors`), which were the
+    same colors. That makes two accepted SETs. It also ran the unload restore once on real firmware,
+    ahead of step 8.
+  - The runbook now uses short `insmod $K` lines and prints `restore_on_unload` after each such load.
 - [ ] Step 3, physical zones: hardware 0 = , 1 = , 2 = , 3 = ; table unchanged after a reload:
 - [ ] Step 4, backlight: `backlight_raw` off/on: ; at each Fn level: ; writing colors while off turns it
       on: ; table unchanged after a reload:

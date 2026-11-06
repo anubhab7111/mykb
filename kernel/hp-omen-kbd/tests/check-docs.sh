@@ -19,13 +19,35 @@ for doc in "$runbook" "$recovery"; do
 	while IFS= read -r finding; do
 		problem "$finding"
 	done < <(awk '
-		/^```bash/ { block = 1; set = 0; next }
+		/^```bash/ { block = 1; set = 0; kset = 0; next }
 		/^```/ { block = 0; next }
 		block && /^D=/ { set = 1 }
+		block && /^K=/ { kset = 1 }
 		block && /\$D/ && !set { print FILENAME ":" FNR ": uses $D before setting it in this block" }
+		block && /\$K/ && !kset { print FILENAME ":" FNR ": uses $K before setting it in this block" }
 		block && /\$V/ { print FILENAME ":" FNR ": a shell variable does not survive to the next step" }
 	' "$doc")
 done
+
+# In P4 step 2, a pasted insmod line arrived split in two: restore_on_unload=0 ran as a shell
+# variable and the module kept its default, so the unload wrote. So insmod lines stay short, and
+# every load that relies on restore_on_unload=0 prints what the module really got.
+while IFS= read -r finding; do
+	problem "$finding"
+done < <(awk '
+	/^```bash/ { block = 1; pending = 0; next }
+	/^```/ {
+		if (pending) print FILENAME ":" pending ": nothing shows the module got restore_on_unload=0"
+		block = 0; next
+	}
+	block && /insmod kernel\// { print FILENAME ":" FNR ": insmod the long path; use $K" }
+	block && /insmod/ && /restore_on_unload=0/ { pending = FNR; next }
+	block && pending && /parameters\/restore_on_unload/ { pending = 0 }
+	block && pending && /insmod|rmmod|tee|poweroff/ {
+		print FILENAME ":" pending ": nothing shows the module got restore_on_unload=0"
+		pending = 0
+	}
+' "$runbook")
 
 # This machine logs dozens of ACPI errors at every boot, and a grep for the module hides new ones.
 grep -q 'sudo dmesg -W' "$runbook" || problem "the runbook must watch new kernel messages with dmesg -W"

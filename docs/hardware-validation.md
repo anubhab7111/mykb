@@ -60,6 +60,12 @@ boot, and those are not yours to worry about. Below, "a new kernel error" means 
 terminal containing `BUG:`, `Oops`, `WARNING:`, `ACPI Error` or `ACPI BIOS Error`. It is a stop
 condition in every step.
 
+**Paste each `insmod` line as one line.** In step 2 a pasted line arrived split in two, so
+`restore_on_unload=0` ran as a shell variable and the module kept its default. So every load that needs
+`restore_on_unload=0` is followed by a line that prints the value the module got. If that line prints
+`Y`, run `sudo rmmod hp_omen_kbd` before doing anything else; nothing has been written yet, so the unload
+writes nothing. Then load again.
+
 Nothing else may write the colors. Run `omen-kbd doctor` and look at "competing writers". Do not
 start the daemon: that is P5. Until P5 the attributes are root-only for writing, so writes go through
 `sudo tee`. Reading needs no `sudo`.
@@ -96,7 +102,8 @@ reads the same colors the old driver read. Nothing is written.
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=1
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
+sudo insmod $K readonly=1
 sudo dmesg --notime | grep hp_omen_kbd
 cat $D/zones $D/backlight $D/info
 cat $D/zones > ~/omen-kbd-p4/colors
@@ -158,8 +165,10 @@ show that the firmware applied anything; step 3 shows that.
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 sudo tee $D/zones < ~/omen-kbd-p4/colors
 cat $D/info
 ```
@@ -171,8 +180,10 @@ Now see what the firmware really holds:
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 | diff ~/omen-kbd-p4/table-step1 -
 ```
 
@@ -202,8 +213,10 @@ are back to what they were, so all 128 bytes must match:
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 | diff ~/omen-kbd-p4/table-step1 -
 ```
 
@@ -272,8 +285,10 @@ Last, compare the table:
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 | diff ~/omen-kbd-p4/table-step1 -
 ```
 
@@ -314,8 +329,9 @@ To see what the firmware does on its own, do it once more with nothing to re-app
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=1
+sudo insmod $K readonly=1
 systemctl suspend                         # wake it up, then look at the keyboard
 cat $D/info
 ```
@@ -333,8 +349,10 @@ budget and the opt-in for effects must stay.
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd                    # skip if it is not loaded
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 echo "FF00FF 00FFFF FF00FF 00FFFF" | sudo tee $D/zones
 sudo poweroff
 ```
@@ -345,7 +363,8 @@ the firmware has now:
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=1
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
+sudo insmod $K readonly=1
 cat $D/zones $D/backlight
 ```
 
@@ -367,8 +386,10 @@ the rest of the table alone. Budget used: at most 900 of the 40000 writes per ho
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 cat $D/zones > ~/omen-kbd-p4/colors-step7
 sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 > ~/omen-kbd-p4/table-step7
 cat $D/info                               # note writes_total
@@ -397,7 +418,8 @@ sudo dd if=/dev/cpu/0/msr bs=8 count=1 skip=52 iflag=skip_bytes status=none | od
 # All those writes must have left the rest of the table alone
 sudo tee $D/zones < ~/omen-kbd-p4/colors-step7
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 | diff ~/omen-kbd-p4/table-step7 -
 ```
 
@@ -426,8 +448,9 @@ machine felt (input lag, audio dropouts). Then pick the default frame rate.
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
 sudo rmmod hp_omen_kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0
+sudo insmod $K readonly=0
 cat $D/zones                              # the boot colors of this load
 echo "FF0000 00FF00 0000FF FFFFFF" | sudo tee $D/zones
 sudo rmmod hp_omen_kbd
@@ -445,7 +468,9 @@ see `docs/recovery.md`.
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
-sudo insmod kernel/hp-omen-kbd/hp_omen_kbd.ko readonly=0 restore_on_unload=0
+K=kernel/hp-omen-kbd/hp_omen_kbd.ko
+sudo insmod $K readonly=0 restore_on_unload=0
+cat /sys/module/hp_omen_kbd/parameters/restore_on_unload   # must print N
 echo "40E0D0 40E0D0 40E0D0 0099ED" | sudo tee $D/zones
 sudo rmmod hp_omen_kbd
 ```
