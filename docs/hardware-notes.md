@@ -126,7 +126,25 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
   - **Writing colors while the light is off leaves it off** (user-confirmed; `backlight` still read
     `0`). The daemon can repaint while off without turning the light on.
   - After a reload, the table equals step 1's.
-- [ ] Step 5, suspend twice: ; colors survive with nothing to re-apply:
+- [ ] Step 5, suspend (2026-11-06): **not finished.**
+  - **Colors survived both wakes**, user-confirmed: one with the module's re-apply (5a), and one with
+    the module loaded `readonly=1` and nothing to re-apply (5b, `writes_total=0`). So the firmware
+    keeps colors across `s2idle` on its own.
+  - The journal has only two suspends, not 5a's two plus 5b's one. No `re-applying colors after resume
+    failed` was logged, but 5a's `writes_total` reads after the wake were lost, so the re-apply is not
+    yet shown to have run.
+  - **Hyprland hung after both wakes.** Its log stops at its own display rescan of the Intel GPU
+    (`card2`, eDP-1), and the user killed it from a TTY.
+  - **Evidence the module is not the cause:**
+    - In 5b the module made no firmware call on resume (`hok_resume` sees nothing written and returns),
+      yet Hyprland hung the same way.
+    - The first fault was `NVRM: … Out of memory … _memdescAllocInternal` at 5a's suspend entry, before
+      any resume code. NVIDIA saves video memory on suspend (`PreserveVideoMemoryAllocations=1`,
+      `/var/tmp`). The module has no suspend callback.
+    - No ACPI error near either wake.
+  - **Against:** two `systemctl suspend`s on 2026-11-03, without the module, came back fine with no
+    NVRM message.
+  - A suspend with the module unloaded settles it.
 - [ ] Step 6, cold boot: shown before login: ; `zones` after login:
 - [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; table unchanged after a reload: ; default frame rate
       picked:
