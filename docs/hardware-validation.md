@@ -230,20 +230,27 @@ echo 1 | sudo tee $D/backlight            # the same colors come back
 sleep 1; cat $D/backlight $D/info
 ```
 
-**Expected:** after `0`, `backlight` reads `0` and `backlight_raw` has bit 7 clear (`0x64` if the
-firmware reports back what it was sent). After `1`, `backlight` reads `1`, `backlight_raw` has bit 7 set
-(`0xe4`), and the keyboard shows the same colors as before.
+**Expected:** after `0`, the keyboard goes dark, `backlight` reads `0` and `backlight_raw` is `0x64`.
+After `1`, the keyboard lights up again with the same colors, `backlight` reads `1` and `backlight_raw`
+is `0xe4`.
 
-**Record:** both `backlight_raw` values.
+Step 0 found that the firmware stores the byte it is sent and returns it unchanged when read. So these
+reads only show that the call went through; **only the keyboard shows whether the light obeyed.** At
+step 1 the firmware's own value was `0x80` (lit). `0xe4` and `0x64` carry the value 100 (`0x64`) in their
+low bits, which this keyboard, with on and off only, may ignore.
 
-Then press the Fn backlight key through all its levels. After each press, wait a second and run:
+**Record:** both `backlight_raw` values, and whether the light after `1` looks the same as before
+`0` (same brightness).
+
+Then press the Fn backlight key (on and off only, on this keyboard) a few times. After each press, wait
+a second and run:
 
 ```bash
 D=/sys/devices/platform/hp-omen-kbd
 cat $D/backlight $D/info
 ```
 
-**Record:** `backlight_raw` at each level, and whether `backlight` matched what you saw.
+**Record:** `backlight_raw` after each press, and whether `backlight` matched what you saw.
 
 A read returns a byte the firmware keeps in BIOS memory, which a WMI backlight set writes. If
 `backlight_raw` does not follow the Fn key, the Fn key does not update that byte. That is a finding,
@@ -275,8 +282,10 @@ sudo dmesg --notime | grep 'hp_omen_kbd: table' | tail -n 8 | diff ~/omen-kbd-p4
 - `echo 0` reports `Input/output error` or `Operation not supported`. The SET's shape is wrong for
   this BIOS. The Fn key still works; the fix is a reviewed code change.
 - The colors differ after turning the backlight back on, or `diff` prints anything.
-- `backlight` disagrees with the keyboard right after `echo 0` or `echo 1`: the bit-7 decode is wrong.
-  At Fn levels, a mismatch is recorded, not a stop (see above).
+- The keyboard does not go dark after `echo 0`, or does not light up after `echo 1`: the firmware does
+  not act on these bytes.
+- After an Fn-key press, `backlight_raw` changes but its bit 7 disagrees with the light: the bit-7
+  decode is wrong. If it does not change at all, record that; it is not a stop (see above).
 - A new kernel error.
 
 ## Step 5: suspend and resume
