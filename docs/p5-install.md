@@ -33,7 +33,8 @@ Three firsts happen here. Nothing has ever exercised them, not even the VM, whic
   power-off with a healthy battery is still open (P4 step 6).
 - **Suspend only from a TTY** (Ctrl+Alt+F3). Hyprland hangs after a wake, which predates the module.
   The daemon is a user service, not part of the Hyprland session, so it keeps running there.
-- **Keep the kernel log open** in a second terminal through steps 2–9: `sudo dmesg -W`. A new line
+  (Do the step 7 wakes before step 8 wires the lock gate.)
+- **Keep the kernel log open** in a second terminal through steps 2–10: `sudo dmesg -W`. A new line
   with `BUG:`, `Oops`, `WARNING:`, `ACPI Error` or `ACPI BIOS Error` is a stop. The `EC0._Q33` /
   `SystemCMOS` group every 30 minutes is the known exception (see `docs/hardware-validation.md`).
 
@@ -191,7 +192,7 @@ before step 5 if you want something else first.
 - No competing writer, and no hp-wmi DKMS package.
 - The theme palette is found.
 - The daemon is not running yet.
-- The hooks are not installed yet (step 7).
+- The hooks are not installed yet (step 8).
 
 **Stop if** `doctor` reports a competing writer, or that you cannot write `zones`.
 
@@ -254,50 +255,11 @@ The keyboard keeps the profile. The daemon remembers it in `~/.local/state/omen-
 **Stop if** a command reports success but the keyboard did not change, or a toggle after the Fn key
 needs two presses.
 
-## Step 7: the desktop hooks
+## Step 7: three wakes
 
-Each hook is a change to `~/dotfiles`, which is stowed into `~/.config`. **You make each change**;
-omen-kbd never edits these files, and Hyprland reloads its config when you save. Do them one at a
-time, in this order. Each file in `packaging/snippets/` says where it goes.
-
-1. **Autostart:** `autostart.lua`. Test: log out and in. `systemctl --user is-active omen-kbd` says
-   `active`.
-2. **Mode colors:**
-
-   ```bash
-   ~/.local/bin/omen-kbd gen-hyprland > ~/dotfiles/config-hypr/.config/hypr/modules/kbdlight.lua
-   ```
-
-   Then add `require("modules.kbdlight")` to `hyprland.lua`. Test:
-   - Hold Super: mauve after about 250 ms, and the profile again on release.
-   - Super+Q and plain typing paint nothing.
-   - Super+R: teal until you leave resize.
-3. **Lock and idle:** `hypridle.conf`, then restart hypridle (`pkill hypridle; hypridle &`, or log
-   out and in). Test:
-   - Lock: the keyboard goes dark. Unlock: the profile.
-   - Leave it idle for 150 s: it dims to 20 %. A key brings it back.
-4. **Waybar:** `waybar-module.jsonc` and `waybar-style.css`. Test:
-   - Click: next profile. Right-click: toggle. Scroll: brightness.
-   - After an Fn-key off, the module shows off.
-5. **Theme:** `rice-theme.md`. Test: `rice-theme apply <another theme>`. The keyboard follows within
-   a second.
-6. **Game mode:** `gamemode.lua`. Test: SUPER+F1. The `game` profile shows (dark, red WASD), and
-   SUPER+F1 again brings the previous one back.
-
-Then `~/.local/bin/omen-kbd doctor` reports no WARN or FAIL.
-
-## Step 8: reboot with everything in place
-
-```bash
-systemctl reboot
-```
-
-After login, with nothing typed:
-- The keyboard shows the saved profile.
-- `systemctl --user is-active omen-kbd` says `active`.
-- `~/.local/bin/omen-kbd doctor` is clean.
-
-## Step 9: three wakes
+The wakes come before the hooks. hypridle locks the session before every suspend
+(`before_sleep_cmd`). Once step 8 wires the lock gate, the keyboard would go dark at each suspend.
+And if Hyprland hangs afterwards and is killed, nothing would ever clear the lock flag (see step 8).
 
 From a TTY (Ctrl+Alt+F3), with the daemon running:
 
@@ -316,12 +278,74 @@ grep -o 'writes_total=[0-9]*' $D/info
 ```
 
 - The keyboard shows the profile after each wake.
-- Each wake adds about 4 to `writes_total`: the module's re-apply (zones and backlight) and the
-  daemon's forced rewrite (zones and backlight).
+- Each wake adds 4 to `writes_total`: the module's re-apply (zones and backlight) and the daemon's
+  forced rewrite (zones and backlight).
 - `status` says on, with no error.
 
 If Hyprland hangs afterwards, `pkill Hyprland` from the TTY and log in again, as in P4. The daemon
 keeps running, and `systemctl --user is-active omen-kbd` stays `active`.
+
+## Step 8: the desktop hooks
+
+Each hook is a change to `~/dotfiles`, which is stowed into `~/.config`. **You make each change**;
+omen-kbd never edits these files, and Hyprland reloads its config when you save. Do them one at a
+time, in this order. Each file in `packaging/snippets/` says where it goes.
+
+1. **Autostart:** `autostart.lua`. Run `systemctl --user stop omen-kbd` (the user manager can outlive
+   a logout), then log out and in. Test:
+   ```bash
+   systemctl --user show -P ActiveEnterTimestamp omen-kbd
+   ```
+   It prints a time after this login.
+2. **Mode colors:**
+
+   ```bash
+   ~/.local/bin/omen-kbd gen-hyprland > ~/dotfiles/config-hypr/.config/hypr/modules/kbdlight.lua
+   ```
+
+   Then add `require("modules.kbdlight")` to `hyprland.lua`. Test:
+   - Hold Super: mauve after about 250 ms, and the profile again on release.
+   - Super+Q and plain typing paint nothing.
+   - Super+R: teal until you leave resize.
+3. **Lock and idle:** `hypridle.conf`. autostart starts hypridle, so restart it detached from your
+   terminal:
+   ```bash
+   pkill -x hypridle; setsid -f hypridle >/dev/null 2>&1
+   ```
+   Test:
+   - Lock (`loginctl lock-session`): the keyboard goes dark. Unlock: the profile.
+   - Leave it idle for 150 s, with no audio playing: it dims to 20 %. A key brings it back.
+4. **Waybar:** `waybar-module.jsonc` and `waybar-style.css`. Test:
+   - Click: next profile. Right-click: toggle. Scroll: brightness.
+   - After an Fn-key off, the module goes on showing "on". With a static profile nothing reads the
+     backlight until something asks: a right-click turns the light back on in one press, and any
+     `omen-kbd status` brings the module up to date.
+5. **Theme:** `rice-theme.md`. Test: `rice-theme apply <another theme>`. The keyboard follows within
+   a second.
+6. **Game mode:** `gamemode.lua`. Test: SUPER+F1. The `game` profile shows (dark, red WASD), and
+   SUPER+F1 again brings the previous one back.
+
+Then `~/.local/bin/omen-kbd doctor` reports no WARN or FAIL.
+
+**Known limitation: a killed session can leave a gate on.** The lock and idle gates come from
+hypridle's commands. If Hyprland dies, or is killed after a wake, while the session is locked or
+idle, the daemon outlives it and never gets the matching `off`. In the new session the keyboard
+then stays dark or dim while `status` says on. Clear both by hand:
+
+```bash
+~/.local/bin/omen-kbd flag locked off; ~/.local/bin/omen-kbd idle off
+```
+
+## Step 9: reboot with everything in place
+
+```bash
+systemctl reboot
+```
+
+After login, with nothing typed:
+- The keyboard shows the saved profile.
+- `systemctl --user is-active omen-kbd` says `active`.
+- `~/.local/bin/omen-kbd doctor` is clean.
 
 ## Step 10: one hour of normal use
 
@@ -350,3 +374,6 @@ After all ten steps pass:
 Still open after P5, until the battery is replaced:
 - whether the colors survive a normal power-off (P4 step 6);
 - the on-battery rules and effect pause.
+
+Still open in the code: a killed Hyprland session can leave the lock or idle gate on (step 8). One
+fix would be to clear both when a new Hyprland instance appears on socket2.
