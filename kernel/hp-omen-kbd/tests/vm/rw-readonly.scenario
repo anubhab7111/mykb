@@ -1,6 +1,6 @@
 # qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
-# The default: nothing is written, input is still parsed first, and unload has nothing to restore.
-load
+# readonly=1: nothing is written, input is still parsed first, and unload has nothing to restore.
+load readonly=1
 write zones FF0000 00FF00 0000FF FFFFFF\n
 write backlight 0\n
 write zones nonsense\n

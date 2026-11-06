@@ -24,8 +24,8 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 - The kernel's own `hp-wmi` is never replaced or patched. The daemon runs as your user, not root.
 - No keylogging: the Hyprland hook looks only at the 8 modifier keys and logs nothing.
 - Colors are written only through the small `hp_omen_kbd` module. It is allowlisted to board 8A4E
-  and loads `readonly=1` until validation. It enforces ≥ 50 ms between writes and an hourly write
-  budget. Each change is one atomic write of all four zones.
+  and was validated on that board's real firmware (P4, `docs/hardware-notes.md`); `readonly=1` still
+  makes it refuse every write. It enforces ≥ 50 ms between writes and an hourly write budget. Each change is one atomic write of all four zones.
 - A static profile costs zero writes. Effects are opt-in (`[effects] enabled = false`) and pause on
   battery, idle, lock and Fn-off.
 - `off` switches the firmware backlight off and never writes black into the zones.
@@ -129,10 +129,12 @@ omen-kbd never edits these files itself.
 kernel. It loads only on board 8A4E, with the HP BIOS WMI interface, and with a four-zone keyboard.
 Anywhere else it returns `ENODEV`. Nothing loads it automatically until the package is installed.
 
-**The module is never loaded on this machine before P4.** Do not run `insmod`, `modprobe` or
-`dkms install` on it. The tests below load it only inside QEMU, which boots this machine's own kernel
-with an ACPI table standing in for HP's firmware. That checks the module's logic and how it behaves in
-the kernel. Whether the real firmware agrees is what P4 is for.
+**P4 validated it on this machine's real firmware on 2026-11-06** (`docs/hardware-validation.md`,
+results in `docs/hardware-notes.md`). Its default is now `readonly=0`.
+
+Until P5 installs the package, load it only by hand, the way the runbook does. The tests below load it
+only inside QEMU, which boots this machine's own kernel with an ACPI table standing in for HP's
+firmware. That checks the module's logic and how it behaves in the kernel.
 
 Arch packages: `base-devel linux-headers qemu-system-x86 acpica libarchive dkms namcap`.
 

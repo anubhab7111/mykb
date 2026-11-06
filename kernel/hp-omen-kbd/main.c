@@ -35,9 +35,10 @@
 #define HOK_BL_CACHE_MS		200
 #define HOK_RESUME_DELAY_MS	1000
 
-static bool readonly = true;
+/* Writable by default since the hardware validation (P4) passed on board 8A4E, BIOS F.21. */
+static bool readonly;
 module_param(readonly, bool, 0444);
-MODULE_PARM_DESC(readonly, "Refuse every write with EPERM (default: 1)");
+MODULE_PARM_DESC(readonly, "Refuse every write with EPERM (default: 0)");
 
 static unsigned int min_interval_ms = 50;
 module_param(min_interval_ms, uint, 0444);

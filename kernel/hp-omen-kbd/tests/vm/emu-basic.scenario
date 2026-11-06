@@ -1,5 +1,5 @@
 # qemu: -acpitable file=@SSDT@ -smbios type=2,manufacturer=HP,product=8A4E
-# The emulator answers every call, so the module loads, read-only, and reports what it was told.
+# The emulator answers every call, so the module loads, writable by default, and reports what it was told.
 # A broken _WDG fails here instead of passing as ENODEV.
 load
 info kbd_type

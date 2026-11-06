@@ -1,10 +1,10 @@
 VM load: ok
 VM info kbd_type=2
-VM info readonly=1
+VM info readonly=0
 VM info header=0102030405060708090a0b0c0d0e0f10111213141516171819
 VM read zones: 40E0D0 40E0D0 40E0D0 0099ED
 VM read backlight: 1
 VM info backlight_raw=0xe4
-VM kmsg: hp_omen_kbd: HP 8A4E keyboard type 2, backlight 0xe4, zones 40E0D0 40E0D0 40E0D0 0099ED, readonly=1
+VM kmsg: hp_omen_kbd: HP 8A4E keyboard type 2, backlight 0xe4, zones 40E0D0 40E0D0 40E0D0 0099ED, readonly=0
 VM unload: ok
 VM kmsg-clean: yes

@@ -187,10 +187,32 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
   - **The SMI counter (MSR `0x34`) did not move in any phase, idle included.** So either writes cause no
     SMI, or this counter does not count them. Either way, the cost visible to the OS is the ACPI time
     above.
-  - Flicker and how the machine felt: not reported yet.
+  - The flicker was smooth at both rates, and the machine stayed responsive (user-confirmed).
+  - **Default frame rate picked: 10 fps**, which is the daemon's existing default (`src/config.hpp`).
 - [x] Step 8, unload (2026-11-06, `~/omen-kbd-p4/step8.sh`, log `step8.log`): **passed.**
   - With `restore_on_unload=1`, the module loaded with `0F84FA 710FFA F9350F FAAC0F`, wrote
     `FF0000 00FF00 0000FF FFFFFF` and was unloaded.
   - The unload logged `restored the boot colors` (the last module line), the sysfs directory was gone,
     and there were no kernel errors.
+  - The keyboard showed red/green/blue/white, then the boot colors again (user-confirmed).
   - Afterwards `~/omen-kbd-p4/set-colors.sh` put the P1 baseline `40E0D0 40E0D0 40E0D0 0099ED` back.
+
+### P4 sign-off (2026-11-06)
+
+All eight steps passed. The module's `readonly` default is now 0, and P5 may install the package.
+
+**Unchanged, by the user's decision:**
+- **Write budget** (40000/hour) and **effects opt-in.** They stay until a normal power-off with a
+  healthy battery shows whether colors persist (step 6 is still open).
+- **10 fps** default.
+
+**Known issues found during P4, none of them the module's:**
+- **Dead battery:** charger unplugs are hard power cuts and reset CMOS.
+- **Hyprland hangs after a wake.**
+- **`EC0._Q33` ACPI errors** every 30 minutes.
+
+**For P5:**
+- The Fn key updates `backlight` (`0x64`/`0xe4`), so polling it every 3 s while an effect runs sees
+  Fn-key changes.
+- Color writes while the light is off leave it off.
+- After a total power loss the firmware starts with `0F84FA 710FFA F9350F FAAC0F` and `0x80`.
