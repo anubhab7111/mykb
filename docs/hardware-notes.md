@@ -171,6 +171,26 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
   - **Battery (not P4's doing; found here):** BAT0 reads 2.74 V against an 11.58 V design minimum, and
     "Not charging". It holds 42 of 83 Wh after 132 cycles. UPower already had it at 3.14 V and
     "pending-charge" on 2026-10-31. Until it is replaced, unplugging the charger is a hard power cut.
-- [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; table unchanged after a reload: ; default frame rate
-      picked:
-- [ ] Step 8, unload: boot colors restored:
+- [x] Step 7, rate test (2026-11-06, `~/omen-kbd-p4/step7.sh`, log `step7.log`): **passed.**
+
+  | Phase | Writes | `real` | `user` | `sys` | SMIs |
+  |---|---|---|---|---|---|
+  | Idle, 60 s | 0 | – | – | – | 0 |
+  | 5/s | 300 in 61.1 s (4.9/s) | 61.0 s | 0.10 s | 0.90 s | 0 |
+  | 10/s | 600 in 62.2 s (9.6/s) | 62.2 s | 0.24 s | 1.82 s | 0 |
+
+  - `last_error=0` throughout. After the colors were put back and the module reloaded, the table was
+    unchanged. No kernel errors at all during the run.
+  - **CPU cost:** about 3 ms of `sys` per write (one GET and one SET through the ACPI interpreter). That
+    is an upper bound: it includes forking `sleep` once per write. At 10 writes/s that is about 3% of one
+    core, at 5/s about 1.5%.
+  - **The SMI counter (MSR `0x34`) did not move in any phase, idle included.** So either writes cause no
+    SMI, or this counter does not count them. Either way, the cost visible to the OS is the ACPI time
+    above.
+  - Flicker and how the machine felt: not reported yet.
+- [x] Step 8, unload (2026-11-06, `~/omen-kbd-p4/step8.sh`, log `step8.log`): **passed.**
+  - With `restore_on_unload=1`, the module loaded with `0F84FA 710FFA F9350F FAAC0F`, wrote
+    `FF0000 00FF00 0000FF FFFFFF` and was unloaded.
+  - The unload logged `restored the boot colors` (the last module line), the sysfs directory was gone,
+    and there were no kernel errors.
+  - Afterwards `~/omen-kbd-p4/set-colors.sh` put the P1 baseline `40E0D0 40E0D0 40E0D0 0099ED` back.
