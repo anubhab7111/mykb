@@ -114,8 +114,18 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
     module existed (14 times on 2026-10-21).
   - This one came 70 s after the last module call, a read.
   - The runbook now lists it as the one known exception.
-- [ ] Step 4, backlight: `backlight_raw` off/on: ; at each Fn level: ; writing colors while off turns it
-      on: ; table unchanged after a reload:
+- [x] Step 4, backlight (2026-11-06): **passed.**
+  - **The backlight SET works on this BIOS.** `echo 0` turned the keyboard dark (`backlight_raw=0x64`).
+    `echo 1` brought it back with the same colors at the same brightness (`0xe4`). Both had
+    `last_error=0`. All user-confirmed.
+  - **The Fn key (on/off only) writes the same byte the module reads:** off gives `0x64`, on gives `0xe4`.
+    So the bit-7 decode is right both ways, and `backlight` follows the Fn key. P5's fallback (read
+    `backlight` every 3 s while an effect runs) can see Fn-key changes.
+  - `0x80`, seen at step 1, is the BIOS's value at boot before anything wrote the byte. It lights the
+    keyboard the same as `0xe4`.
+  - **Writing colors while the light is off leaves it off** (user-confirmed; `backlight` still read
+    `0`). The daemon can repaint while off without turning the light on.
+  - After a reload, the table equals step 1's.
 - [ ] Step 5, suspend twice: ; colors survive with nothing to re-apply:
 - [ ] Step 6, cold boot: shown before login: ; `zones` after login:
 - [ ] Step 7, rate test: 5 writes/s: ; 10 writes/s: ; table unchanged after a reload: ; default frame rate
