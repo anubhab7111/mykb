@@ -81,7 +81,17 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
     - Step 7's `time` cannot see the cost, because that lives in the code that consumes the flag. The
       SMI counter (MSR `0x34`) can.
     - Whether `BRGB` reaches flash is what step 6 answers.
-- [ ] Step 1, load read-only: `kbd_type` = , `backlight_raw` = , zones match the baseline: ; table:
+- [x] Step 1, load read-only (2026-11-06, kernel 7.2.14-arch1-1): **passed.**
+  - **The gate and the keyboard-type query work:** `kbd_type=1`, `last_error=0`, no new kernel errors.
+  - **`backlight_raw = 0x80`, not `0xE4`:** bit 7 is set and the keyboard is lit. This keyboard has only
+    on and off (no brightness levels).
+  - **Table exactly as step 0 predicted:** byte 0 `03`, bytes 25–36 the colors, the rest `00`.
+  - **Zones `0F84FA 710FFA F9350F FAAC0F`, not the P1 baseline,** but they match the keyboard
+    (user-confirmed), so the later steps use these.
+  - **Where those colors came from is unknown.** Since P1 the journal shows many full power-offs and
+    several unlogged ends (crash or hard power-off), and Windows is installed (OMEN Gaming Hub could
+    have set them). Step 6 decides whether a power-off resets the colors.
+  - No "taints kernel" lines: the NVIDIA DKMS modules had already tainted the kernel (`OE`).
 - [ ] Step 2, same colors written back: table unchanged after a reload:
 - [ ] Step 3, physical zones: hardware 0 = , 1 = , 2 = , 3 = ; table unchanged after a reload:
 - [ ] Step 4, backlight: `backlight_raw` off/on: ; at each Fn level: ; writing colors while off turns it
