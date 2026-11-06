@@ -8,6 +8,7 @@
 #include <print>
 #include <sys/epoll.h>
 #include <unistd.h>
+#include <utility>
 
 namespace omenkbd {
 
@@ -102,7 +103,10 @@ SystemDbusSource::SystemDbusSource(EventLoop &loop, Emit emit)
                  }}},
                "logind");
         login.uponSignal("PrepareForSleep").onInterface(kLoginManager).call([this](bool entering) {
-            guarded([&] { emit_(Event{event::Sleep{entering}}); });
+            guarded([&] {
+                sleeping_ = entering;
+                emit_(Event{event::Sleep{entering}});
+            });
         });
         find_session(login);
     });
@@ -321,6 +325,11 @@ void SystemDbusSource::shutdown(const std::string &why) {
     }
     proxies_.clear();
     bus_.reset();
+    // No PrepareForSleep(false) can arrive any more. The bus usually goes away while the system
+    // is running (dbus restarted), so the sleep is over or about to be.
+    if (std::exchange(sleeping_, false)) {
+        emit_(Event{event::Sleep{false}});
+    }
 }
 
 } // namespace omenkbd

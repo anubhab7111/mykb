@@ -1,18 +1,24 @@
 // Event sources in real time: Hyprland socket2 (fake listener), theme symlink watcher (temp
-// tree), hwmon (fake sysfs).
+// tree), hwmon (fake sysfs), system D-Bus (a private dbus-daemon with a fake logind).
 
 #include "helpers.hpp"
 
 #include "ipc/socket.hpp"
 #include "sources/hwmon.hpp"
 #include "sources/hyprland.hpp"
+#include "sources/system_dbus.hpp"
 #include "sources/theme.hpp"
+
+#include <sdbus-c++/sdbus-c++.h>
 
 #include <gtest/gtest.h>
 
+#include <csignal>
 #include <mutex>
 #include <poll.h>
+#include <spawn.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 
@@ -114,6 +120,72 @@ void swap_link(const fs::path &link, const fs::path &target) {
     const fs::path tmp = link.string() + ".new";
     fs::create_symlink(target, tmp);
     fs::rename(tmp, link);
+}
+
+/// A private dbus-daemon listening in `dir`, stopped by stop() or the destructor. Not ok() when
+/// dbus-daemon is not installed or does not come up.
+class PrivateBus {
+  public:
+    explicit PrivateBus(const fs::path &dir)
+        : socket_(dir / "bus"), address_("unix:path=" + socket_.string()) {
+        const std::string addr_arg = "--address=" + address_;
+        std::array<const char *, 6> argv{"dbus-daemon", "--session",      "--nofork",
+                                         "--nopidfile", addr_arg.c_str(), nullptr};
+        if (::posix_spawnp(&pid_, "dbus-daemon", nullptr, nullptr,
+                           const_cast<char *const *>(argv.data()), environ) != 0) {
+            pid_ = -1;
+            return;
+        }
+        ok_ = wait_until([this] { return fs::exists(socket_); }, 5000ms);
+    }
+    ~PrivateBus() { stop(); }
+    PrivateBus(const PrivateBus &) = delete;
+    PrivateBus &operator=(const PrivateBus &) = delete;
+
+    [[nodiscard]] bool ok() const { return ok_; }
+    [[nodiscard]] const std::string &address() const { return address_; }
+    void stop() {
+        if (pid_ > 0) {
+            ::kill(pid_, SIGTERM);
+            ::waitpid(pid_, nullptr, 0);
+            pid_ = -1;
+        }
+    }
+
+  private:
+    fs::path socket_;
+    std::string address_;
+    pid_t pid_ = -1;
+    bool ok_ = false;
+};
+
+/// Owns org.freedesktop.login1 on `bus` and sends PrepareForSleep, as logind does.
+class FakeLogind {
+  public:
+    explicit FakeLogind(const std::string &address)
+        : conn_(sdbus::createSessionBusConnectionWithAddress(address)) {
+        conn_->requestName(sdbus::ServiceName{"org.freedesktop.login1"});
+        obj_ = sdbus::createObject(*conn_, sdbus::ObjectPath{"/org/freedesktop/login1"});
+    }
+    void prepare_for_sleep(bool entering) {
+        obj_->emitSignal("PrepareForSleep")
+            .onInterface("org.freedesktop.login1.Manager")
+            .withArguments(entering);
+    }
+
+  private:
+    std::unique_ptr<sdbus::IConnection> conn_;
+    std::unique_ptr<sdbus::IObject> obj_;
+};
+
+std::vector<event::Sleep> sleeps(const Events &events) {
+    std::vector<event::Sleep> out;
+    for (const Event &e : events.get()) {
+        if (const auto *s = std::get_if<event::Sleep>(&e)) {
+            out.push_back(*s);
+        }
+    }
+    return out;
 }
 
 } // namespace
@@ -276,4 +348,57 @@ TEST(Hwmon, PollerEmitsCpuTemp) {
     LoopThread running(loop);
     ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 1000ms)) << "first reading at once";
     EXPECT_EQ(events.get().front(), Event{FactUpdate{fact::CpuTemp{52.5}}});
+}
+
+// Losing the system bus between PrepareForSleep(true) and (false) would leave the daemon
+// suspended for good (no frames, no writes); the source ends the sleep when it gives up.
+TEST(SystemDbus, BusLostDuringSleepEndsTheSleep) {
+    TempDir dir;
+    PrivateBus bus(dir.path());
+    if (!bus.ok()) {
+        GTEST_SKIP() << "dbus-daemon is not available";
+    }
+    const ScopedEnv env("DBUS_SYSTEM_BUS_ADDRESS", bus.address());
+    FakeLogind logind(bus.address());
+    EventLoop loop;
+    Events events;
+    SystemDbusSource source(loop, events.sink());
+    const LoopThread running(loop);
+    // The source subscribes asynchronously: repeat the signal until it arrives.
+    ASSERT_TRUE(wait_until(
+        [&] {
+            logind.prepare_for_sleep(true);
+            return !sleeps(events).empty();
+        },
+        5000ms));
+    ASSERT_EQ(sleeps(events).back(), event::Sleep{true});
+    bus.stop();
+    EXPECT_TRUE(wait_until([&] { return sleeps(events).back() == event::Sleep{false}; }, 5000ms))
+        << "the daemon would stay suspended";
+}
+
+TEST(SystemDbus, BusLostWhileAwakeSendsNoSleepEvent) {
+    TempDir dir;
+    PrivateBus bus(dir.path());
+    if (!bus.ok()) {
+        GTEST_SKIP() << "dbus-daemon is not available";
+    }
+    const ScopedEnv env("DBUS_SYSTEM_BUS_ADDRESS", bus.address());
+    FakeLogind logind(bus.address());
+    EventLoop loop;
+    Events events;
+    SystemDbusSource source(loop, events.sink());
+    const LoopThread running(loop);
+    ASSERT_TRUE(wait_until(
+        [&] {
+            logind.prepare_for_sleep(true);
+            return !sleeps(events).empty();
+        },
+        5000ms));
+    logind.prepare_for_sleep(false);
+    ASSERT_TRUE(wait_until([&] { return sleeps(events).back() == event::Sleep{false}; }, 5000ms));
+    const std::size_t n = sleeps(events).size();
+    bus.stop();
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(sleeps(events).size(), n) << "no extra wake when the bus goes away while awake";
 }
