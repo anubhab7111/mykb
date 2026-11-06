@@ -3,6 +3,7 @@
 //   net.hadess.PowerProfiles ActiveProfile (tlp-pd here)      ⇒ Fact PowerProfile
 //   UPower OnBattery, DisplayDevice Percentage                 ⇒ Fact OnBattery, BatteryPct
 //   logind PrepareForSleep, LidClosed                          ⇒ Sleep, Fact LidClosed
+//   (losing the bus between PrepareForSleep true and false     ⇒ Sleep{false})
 //   logind session (User.Display): LockedHint, Unlock signal   ⇒ Fact Locked
 // The session's Lock signal is deliberately not used: it is a request to lock, and with hyprlock
 // nothing ever reverses it (hyprlock sets no LockedHint and unlocking emits no Unlock), so the
@@ -68,6 +69,9 @@ class SystemDbusSource {
     std::optional<EventLoop::TimerId> timer_;
     std::optional<TimePoint> timer_at_;
     std::set<std::string> warned_;
+    /// Between PrepareForSleep(true) and (false): if the bus goes away in between, shutdown()
+    /// ends the sleep, or the daemon would stay suspended for good.
+    bool sleeping_ = false;
 };
 
 } // namespace omenkbd
