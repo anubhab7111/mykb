@@ -101,7 +101,12 @@ The runbook is `docs/hardware-validation.md`. Fill this in as its steps pass. Th
     same colors. That makes two accepted SETs. It also ran the unload restore once on real firmware,
     ahead of step 8.
   - The runbook now uses short `insmod $K` lines and prints `restore_on_unload` after each such load.
-- [ ] Step 3, physical zones: hardware 0 = , 1 = , 2 = , 3 = ; table unchanged after a reload:
+- [x] Step 3, physical zones (2026-11-06): **passed.**
+  - The firmware applies a SET, and red, green and blue are in that order.
+  - Each write lit one zone in the named color, matching the default map (user-confirmed): hardware
+    0 = right, 1 = middle, 2 = left, 3 = WASD. The zone map in `config.toml` needs no change.
+  - After the colors were put back and the module reloaded, the table equals step 1's.
+  - Both loads printed `restore_on_unload` = `N`.
 - [ ] Step 4, backlight: `backlight_raw` off/on: ; at each Fn level: ; writing colors while off turns it
       on: ; table unchanged after a reload:
 - [ ] Step 5, suspend twice: ; colors survive with nothing to re-apply:
