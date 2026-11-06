@@ -16,8 +16,9 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 | Part | State |
 |---|---|
 | Daemon, CLI, Waybar stream, Hyprland hook, `doctor` | Done. Tested against a mock backend and fake sysfs trees (GoogleTest, ASan + UBSan). |
-| Kernel module `hp_omen_kbd` | Written, and tested in a VM against a firmware emulator. **Not yet loaded on the real laptop.** The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
-| Hardware validation | Next, one approved step at a time: `docs/hardware-validation.md`. |
+| Kernel module `hp_omen_kbd` | Tested in a VM against a firmware emulator, and validated on this laptop's real firmware (P4, 2026-11-06). The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
+| Hardware validation | Done (P4): `docs/hardware-validation.md`, results in `docs/hardware-notes.md`. |
+| Install and soak | In progress (P5), one approved step at a time: `docs/p5-install.md`. |
 
 ## Safety
 
@@ -132,7 +133,8 @@ Anywhere else it returns `ENODEV`. Nothing loads it automatically until the pack
 **P4 validated it on this machine's real firmware on 2026-11-06** (`docs/hardware-validation.md`,
 results in `docs/hardware-notes.md`). Its default is now `readonly=0`.
 
-Until P5 installs the package, load it only by hand, the way the runbook does. The tests below load it
+P5 installs it as a DKMS package that loads it at every boot (`docs/p5-install.md`). Before that,
+load it only by hand, the way the P4 runbook does. The tests below load it
 only inside QEMU, which boots this machine's own kernel with an ACPI table standing in for HP's
 firmware. That checks the module's logic and how it behaves in the kernel.
 
@@ -186,5 +188,6 @@ its `.expected` file lists exactly what they must print. After a kernel update w
   `docs/superpowers/specs/2026-10-21-omen-kbd-design.md`
 - Hardware notes for this laptop: `docs/hardware-notes.md`
 - Hardware validation runbook (P4): `docs/hardware-validation.md`
+- Install and soak runbook (P5): `docs/p5-install.md`
 - Recovery: `docs/recovery.md`
 - Implementation plans: `docs/superpowers/plans/`

@@ -5,6 +5,7 @@ set -u
 dir=$(cd "$(dirname "$0")/.." && pwd)
 runbook=$dir/../../docs/hardware-validation.md
 recovery=$dir/../../docs/recovery.md
+install=$dir/../../docs/p5-install.md
 status=0
 
 problem() {
@@ -15,7 +16,7 @@ problem() {
 # Steps get approved one at a time, often in a new terminal, and step 6 reboots. With D unset,
 # "sudo tee $D/zones" reports success and writes a file called /zones on the root filesystem. So
 # every block that uses D sets it first, and the colors to keep live in a file, not a variable.
-for doc in "$runbook" "$recovery"; do
+for doc in "$runbook" "$recovery" "$install"; do
 	while IFS= read -r finding; do
 		problem "$finding"
 	done < <(awk '
