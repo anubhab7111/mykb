@@ -285,3 +285,19 @@ Runbook: `docs/p5-install.md`. Kernel 7.2.14-arch1-1, BIOS F.21.
     `0x00`.
   - The daemon was not autostarted yet (step 8), so the user started it by hand. Its first frame put
     `baseline` back from `state.json`.
+- **Step 7, three wakes (s2idle, from a TTY, daemon running, no lock hook yet).**
+  - Three suspends, 16:49–16:50, about 4 s each.
+  - After every wake the keyboard showed `baseline` (user-confirmed) and the daemon stayed active.
+  - `writes_total` went 4 → 8 → 12 → 16: +4 per wake, from the module's re-apply (zones and
+    backlight) and the daemon's forced rewrite (zones and backlight).
+  - `last_error=0` and no kernel errors.
+  - After the first wake the counter still read 4 at the 6-second mark. All four writes had landed
+    before the next suspend.
+- **A normal power-off keeps the colors (answers part of P4 step 6).**
+  - At 16:52:30, `systemctl poweroff` with the charger connected.
+  - The machine stayed off for 31 minutes and booted at 17:23 with the RTC intact.
+  - At load the module read `40E0D0 40E0D0 40E0D0 0099ED` and backlight `0xe4` from the firmware,
+    i.e. what the daemon had written.
+  - With the three total power losses (P4 step 6, and twice during P5), all of which reset the colors
+    to the firmware's own `0F84FA 710FFA F9350F FAAC0F`: the colors live in memory kept alive by
+    standby power, not in non-volatile storage that survives without it.
