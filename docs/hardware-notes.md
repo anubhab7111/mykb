@@ -301,3 +301,25 @@ Runbook: `docs/p5-install.md`. Kernel 7.2.14-arch1-1, BIOS F.21.
   - With the three total power losses (P4 step 6, and twice during P5), all of which reset the colors
     to the firmware's own `0F84FA 710FFA F9350F FAAC0F`: the colors live in memory kept alive by
     standby power, not in non-volatile storage that survives without it.
+- **Step 8, desktop hooks. Each was a dotfiles change, made one at a time and confirmed by the user.**
+  1. **Autostart** (`autostart.lua:25`): after a logout and login, Hyprland started at 17:34:47 and
+     the daemon at 17:34:48.
+  2. **Mode colors** (`kbdlight.lua` from `gen-hyprland`, required from `hyprland.lua:15`):
+     - Holding Super gave mauve, Super+Shift blue, Ctrl peach.
+     - Chords (Super+Q) and Shift while typing painted nothing.
+     - Super+R gave `submap:resize` = `#26FFDB`. The vivid teal is too close to the baseline turquoise
+       to see, so the status stream confirmed it. A held Super inside resize showed mauve on top of it.
+     - Every hint released back to `baseline`, and nothing stuck.
+  3. **Lock and idle** (`hypridle.conf`: `on_lock_cmd`/`on_unlock_cmd`, plus the 150 s listener
+     calling `omen-kbd idle`): dark while locked, dimmed when idle, `baseline` again afterwards.
+  4. **Waybar** (`custom/kbd`): the pill shows the profile. Click, right-click, scroll and the hint
+     style all worked.
+  5. **Theme** (`rice-theme` `reload_apps()`):
+     - With the theme-colored `default` profile, mocha `8926FF 2679FF 26FFDB FF7926` became latte
+       `8426FF 1F6AFF 26F3FF FF640B` and back.
+     - The daemon followed, but the user saw no change: vivid boosting makes two flavors with the same
+       hues look nearly alike on the LEDs.
+  6. **Game mode** (`modes.lua`, in `rice.gamemode.toggle()`): SUPER+F1 switched to `game`
+     (`202020 202020 202020 FF0000`, rule `gamemode`), and SUPER+F1 again brought `baseline` back.
+
+  Afterwards `doctor`: all 10 checks OK. `last_error=0` throughout.
