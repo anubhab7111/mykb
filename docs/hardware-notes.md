@@ -216,3 +216,36 @@ All eight steps passed. The module's `readonly` default is now 0, and P5 may ins
   Fn-key changes.
 - Color writes while the light is off leave it off.
 - After a total power loss the firmware starts with `0F84FA 710FFA F9350F FAAC0F` and `0x80`.
+
+## P5 results
+
+Runbook: `docs/p5-install.md`. Kernel 7.2.14-arch1-1, BIOS F.21.
+
+- **Step 1, package (2026-11-07).**
+  - `hp-omen-kbd-dkms` 0.1.0-1 was built with `makepkg` and installed with `pacman -U`.
+  - The package holds only the module sources, the udev rule, sysusers and modules-load files.
+  - DKMS built it into `updates/dkms/`, and its `srcversion` `3F33C2E8F892E41D55D8E72` equals the
+    module P4 tested.
+  - `hp_wmi` is still the stock in-tree module.
+  - sysusers created group `omen-kbd` (gid 949), and the user joined it.
+  - The module has no modalias, so nothing loaded it during the install.
+  - The battery read 2.87 V.
+- **Between steps 1 and 2: another total power loss.**
+  - The machine lost power while it was shut down. At the next boot the RTC read
+    `2022-01-01 00:00:25`, so CMOS had reset.
+  - The firmware came up with `0F84FA 710FFA F9350F FAAC0F` / `0x80` again, the same state as P4
+    step 6.
+  - The module was not loaded at the time, so a total power loss resets the colors whoever set them.
+- **Step 2, modprobe.**
+  - Right after `modprobe`, `zones` and `backlight` were `-rw-rw-r-- root omen-kbd`, the first proof
+    that udev's `RUN` line works.
+  - The load wrote nothing: `kbd_type=1`, `readonly=0`, `writes_total=0`, `last_error=0`.
+- **Step 3, reboot (warm, `systemctl reboot`).**
+  - The RTC kept its time.
+  - `systemd-modules-load` loaded the module at boot, logging nothing, and the module's load lines
+    showed no error.
+  - udev set the permissions again at boot.
+  - The user manager's `Groups:` included 949.
+  - Then, as the user without sudo, one write of the P1 baseline `40E0D0 40E0D0 40E0D0 0099ED`
+    succeeded: `writes_total` 0 → 1, `last_error=0`, and the keyboard changed (user-confirmed). Group
+    `omen-kbd` can write the keyboard.
