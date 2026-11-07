@@ -5,18 +5,34 @@
 # Bind it (modules/binds or wherever your launcher bind lives), with the full path because
 # Hyprland's PATH lacks ~/.local/bin:
 #     hl.bind("SUPER + K", hl.dsp.exec_cmd("~/.local/bin/omen-kbd-menu"))
-# Uses your own rofi config and theme. Escape goes back one level; Escape at the top closes it.
+# Uses your own rofi config and theme; icons come from rofi's icon theme through the row's icon
+# field, so they show inside the icon box. Escape goes back one level; Escape at the top closes it.
 # It only calls the omen-kbd CLI, so every change goes through the daemon like any other command.
 set -u
 
 bin=~/.local/bin/omen-kbd
 cfg=~/.config/omen-kbd/config.toml
 
-menu() { # menu <prompt> [message]: choices on stdin, the pick on stdout
+# Icon names in the rofi icon theme (candy-icons here; other themes fall back to a generic icon).
+ic_profile=preferences-desktop-keyboard
+ic_brightness=preferences-desktop-display
+ic_power=system-shutdown
+ic_effect=preferences-system-windows-effect-flipswitch
+ic_color=preferences-color
+ic_doctor=utilities-system-monitor
+
+menu() { # menu <prompt> [message]: rows on stdin, the picked text on stdout
 	rofi -dmenu -i -p "$1" -mesg "${2:-}" -no-custom -format s
 }
 ask() { # ask <prompt> [message]: free text
 	rofi -dmenu -p "$1" -mesg "${2:-}" -lines 0 </dev/null
+}
+row() { # row <text> <icon>: one rofi row with an icon
+	printf '%s\0icon\x1f%s\n' "$1" "$2"
+}
+icons() { # icons <icon>: stdin lines become rows that all carry the same icon
+	local l
+	while IFS= read -r l; do row "$l" "$1"; done
 }
 run() { # run <omen-kbd args>: show the daemon's error, if any
 	local out
@@ -48,24 +64,32 @@ fi
 accents="rosewater flamingo pink mauve red maroon peach yellow green teal sky sapphire blue lavender"
 
 while true; do
-	pick=$(printf '%s\n' \
-		"󰌌  Profile" "󰃟  Brightness" "󰐥  Power: toggle" "󰓅  Effect" "󰏘  Color" "󰋠  Doctor" |
-		menu "Keyboard" "$(state)") || exit 0
+	# Piped straight into rofi: a $( ) capture would drop the NUL bytes that carry the icons.
+	pick=$(
+		{
+			row Profile "$ic_profile"
+			row Brightness "$ic_brightness"
+			row "Power: toggle" "$ic_power"
+			row Effect "$ic_effect"
+			row Color "$ic_color"
+			row Doctor "$ic_doctor"
+		} | menu "Keyboard" "$(state)"
+	) || exit 0
 	case "$pick" in
-	*Profile)
-		sel=$( (profiles; echo custom) | menu "Profile" "$(state)") || continue
+	Profile)
+		sel=$( (profiles; echo custom) | icons "$ic_profile" | menu "Profile" "$(state)") || continue
 		run profile "$sel"
 		;;
-	*Brightness)
-		sel=$(printf '%s\n' 100 75 50 25 10 0 +10 -10 | menu "Brightness %" "$(state)") || continue
+	Brightness)
+		sel=$(printf '%s\n' 100 75 50 25 10 0 +10 -10 | icons "$ic_brightness" | menu "Brightness %" "$(state)") || continue
 		run brightness "$sel"
 		;;
-	*Power*) run toggle ;;
-	*Effect)
-		sel=$(printf '%s\n' static breathe wave cycle gradient | menu "Effect" "$(state)") || continue
+	Power*) run toggle ;;
+	Effect)
+		sel=$(printf '%s\n' static breathe wave cycle gradient | icons "$ic_effect" | menu "Effect" "$(state)") || continue
 		spd=""
 		if [ "$sel" != static ]; then
-			spd=$(printf '%s\n' "slow (20)" "medium (50)" "fast (80)" | menu "Speed" "$sel") || continue
+			spd=$(printf '%s\n' "slow (20)" "medium (50)" "fast (80)" | icons "$ic_effect" | menu "Speed" "$sel") || continue
 			spd=${spd##*(}
 			spd=${spd%)}
 		fi
@@ -75,20 +99,20 @@ while true; do
 			run effect "$sel"
 		fi
 		;;
-	*Color)
+	Color)
 		sel=$( (
 			for a in $accents; do echo "theme:$a"; done
 			echo "Custom hex…"
-		) | menu "Color (all zones)" "$(state)") || continue
+		) | icons "$ic_color" | menu "Color (all zones)" "$(state)") || continue
 		if [ "$sel" = "Custom hex…" ]; then
 			sel=$(ask "Hex" "1 color, or 4: left middle right wasd (e.g. ff2d95 7a3cff 00c2ff ffb000)") || continue
 		fi
 		read -ra cols <<<"$sel" # one to four words
 		[ "${#cols[@]}" -gt 0 ] && run set "${cols[@]}"
 		;;
-	*Doctor)
+	Doctor)
 		out=$("$bin" doctor 2>&1)
-		printf '%s\n' "$out" | menu "doctor" "read-only checks" >/dev/null
+		printf '%s\n' "$out" | icons "$ic_doctor" | menu "doctor" "read-only checks" >/dev/null
 		;;
 	esac
 done
