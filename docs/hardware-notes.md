@@ -249,3 +249,16 @@ Runbook: `docs/p5-install.md`. Kernel 7.2.14-arch1-1, BIOS F.21.
   - Then, as the user without sudo, one write of the P1 baseline `40E0D0 40E0D0 40E0D0 0099ED`
     succeeded: `writes_total` 0 → 1, `last_error=0`, and the keyboard changed (user-confirmed). Group
     `omen-kbd` can write the keyboard.
+- **Step 4, daemon and config.**
+  - `omen-kbd` was installed from `p5-install` (with the I5 and I3 fixes), along with the user unit.
+  - The config is the example with a first profile `baseline` = `40E0D0 40E0D0 40E0D0 0099ED`.
+  - `doctor` gave OK for the config, the backend (`readonly=0`), the permissions, competing writers,
+    hp-wmi DKMS and the theme palette. It warned only that the daemon was not running and the hooks
+    were missing.
+- **Step 5, first daemon start.**
+  - The daemon is active, and its `Groups:` include 949.
+  - Its first frame wrote the backlight and the zones: `writes_total` 1 → 3, `last_error=0`.
+  - `backlight_raw` went `0x80` → `0xe4`. That is the firmware's post-power-loss "on" replaced by the
+    standard "on"; the light did not change.
+  - The keyboard looked the same (user-confirmed).
+  - `status` showed `baseline`, `hp-omen-kbd`, on. No journal warnings and no kernel errors.
