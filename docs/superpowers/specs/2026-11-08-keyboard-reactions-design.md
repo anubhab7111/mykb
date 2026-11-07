@@ -24,8 +24,15 @@ Six reactions. The writes are counted on a static profile, and each write is one
 | 4 | Attention light | A window that is not focused asks for attention (Hyprland `urgent`) | The right zone in `theme:yellow` blinks twice (on, off, on, 150 ms each), then **holds steady** until every such window has been focused or closed | 4 per episode | More urgent windows while it is lit cost 0. |
 | 5 | Fullscreen video | The focused window is in true fullscreen, and its app class is in a list (default `mpv`, `vlc`, `firefox`, `chromium`) | Brightness capped at 15% (a rule) | 1 on entering, 1 on leaving | Hyprland's repeated `fullscreen` events cost 0, because the state is compared, not counted. |
 | 6 | Notification flash | swaync receives a notification | Every zone blinks once for 150 ms: `theme:red` if critical, the app's color from a table (ZapZap `theme:green`, Discord `#5865f2`), otherwise `theme:blue` | 2 | At most one flash waits in a queue, so a burst costs ≤ 4. |
-| 7 | Claude lamp: waiting | Any Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then **holds steady** until that session continues, finishes or ends | 4 per episode | More sessions waiting while it is lit cost 0. |
+| 7 | Claude lamp: waiting | Any Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then **holds steady** until you focus that session's terminal window, or the session continues, finishes or ends. If that terminal is already focused, it does not light at all. | 4 per episode, 0 if you are looking | More sessions waiting while it is lit cost 0. |
 | 8 | Claude lamp: finished | A Claude Code session finishes its turn | WASD blinks once, 150 ms, `theme:green`. Skipped if that session's terminal window is focused. | 2 | Queued like #6. |
+
+How the lamp knows a session's terminal: the hook finds its terminal window (§5.12), and the daemon
+uses that window in three ways:
+- it decides #8's skip;
+- it clears #7 on focus;
+- it lets the lamp **absorb an urgent signal from the same window**. If Claude rings the bell and
+  Alacritty marks itself urgent, that does not add a second light (#4) for the same event.
 
 The decision recorded for this table (user, 2026-11-08): the two waiting lights (#4, #7) **blink and
 then hold**. They never pulse continuously. A continuous pulse would cost about 10 writes a second
@@ -38,6 +45,9 @@ for as long as something waits, which could be hours. Holding a steady color cos
   - the session is locked with `on_lock = "off"`, or idle with `on_idle = "off"`;
   - the machine is suspended;
   - the hourly write budget is exhausted.
+- The firmware backlight is off after the Fn key. The daemon cannot see the Fn key, so before a
+  reaction starts it reads the backlight if its last reading is older than 5 s (§5.7). Only a
+  reaction within 5 s of an Fn press can write unseen.
 - Short reactions (#1–3, #6, #8) also stay silent while the user is away: locked or idle, whatever
   the gate does. They are dropped, not saved for later.
 - Notifications are also skipped:
@@ -142,6 +152,20 @@ The order has three consequences:
     `Stop`, exit code 2 blocks stopping. **So the hook prints nothing and always exits 0.**
   - The user already has one hook, a `SessionStart` hook in `~/.claude/settings.json`, which must
     be kept.
+  - What the official reference says about timing (builder check, 2026-11-08):
+    - `PermissionRequest` fires as soon as a prompt is about to show. It is **not used**: the
+      `permission_prompt` notification fires only after the prompt has waited a few seconds, so
+      approvals made within those few seconds cost 0 writes.
+    - `PostToolUse` fires after a tool completes, and `PostToolUseFailure` after it fails.
+    - Nothing fires at the moment of approval or denial.
+    - `Stop` does not fire after a user interrupt.
+- **Where Claude Code runs here** (checked 2026-11-08):
+  - In **Alacritty**, which runs one process per window (pid 3544), with no tmux or zellij.
+  - Every running session, **background jobs included**, descends from the interactive `claude`
+    process in that window.
+  - `preferredNotifChannel` is unset, so Claude Code uses its default.
+  - Whether a prompt rings the bell, and whether Alacritty then marks itself urgent, is checked live
+    (§8).
 - **Repo:** C++23, CMake + Ninja, GoogleTest, ASan + UBSan, `-Werror`, `.clang-format` (4 spaces),
   clang-tidy.
   - The working tree has an **uncommitted reformat of `src/sources/hyprland.cpp`** by the user's
@@ -189,9 +213,9 @@ A closed `std::variant`. It carries no colors, titles or notification text.
 | `WorkspaceSwitched{int from, int to}` | tracker; only when both ids are > 0 and differ |
 | `WindowOpened{}`, `WindowClosed{}` | tracker |
 | `UrgentRaised{std::string window}`, `UrgentCleared{std::string window}`, `UrgentReset{}` | tracker |
-| `FocusChanged{std::string app_class}` | tracker (class only; used to skip notifications from the focused app) |
+| `FocusChanged{std::string window, std::string app_class}` | tracker. Emitted on `activewindowv2`, with the class from the `activewindow` line before it. Used to clear lamps on focus and to skip notifications from the focused app. |
 | `Notified{std::string app, std::string desktop_entry, Urgency urgency}` | `req::Notify` |
-| `AgentWaiting{session}`, `AgentWorking{session}`, `AgentDone{session, bool flash}`, `AgentEnded{session}` | `req::Agent` |
+| `AgentWaiting{session, std::optional<std::string> window}`, `AgentWorking{session}`, `AgentDone{session, std::optional<std::string> window}`, `AgentEnded{session}` | `req::Agent` |
 
 Fullscreen is **not** a signal. It is a fact, `fact::FullscreenApp{std::optional<std::string> app_class}`,
 because it is a state that the existing rules engine already knows how to act on (§5.8).
@@ -242,8 +266,18 @@ model the way submaps do today.
   visible and the user is present. After that it holds steady (`Paint`), at zero writes over time.
 - Agent keys expire after `ttl_s`, default 3600, so a crashed session cannot leave the lamp on
   forever. Urgent keys are cleared by focus, close or a Hyprland disconnect.
+- **Windows.** A key may carry the window it belongs to:
+  - an urgent key's own address;
+  - the terminal window an agent hook reported.
+
+  Three rules use them:
+  - Focusing a window clears every key linked to it.
+  - An agent key is not recorded if its window is already focused when it is raised.
+  - An urgent raise for a window that already has an agent key is absorbed: no second light for one
+    event.
 - API (pure):
-  - `raise(kind, key, now)`, `clear(kind, key)`, `clear_kind(kind)`, `expire(now)`
+  - `raise(kind, key, now, std::optional<std::string> window)`, `clear(kind, key)`,
+    `clear_window(window)`, `clear_kind(kind)`, `expire(now)`
   - `layer(now) -> LayerOps`
   - `next_change(now)` (intro boundaries and TTL expiry)
   - `active() -> std::vector<LampKind>`
@@ -287,6 +321,17 @@ model the way submaps do today.
   no wake-ups and no writes. `on_wake()` recomputes when the reaction deadline is due.
 - `notify` and `agent` requests are answered as soon as the model has applied them. Unlike `set`,
   they do not wait for the keyboard write, so hooks return fast.
+- **Read before start.** The Fn key changes the firmware backlight without any event. So before
+  delivering a signal that could start a short clip or a lamp intro, the daemon checks its last
+  backlight reading. If that reading is unknown or older than 5 s, the daemon asks the writer thread
+  for a read and delivers the signal when the reading arrives.
+  - If the read times out (the existing reply timeout), the signal is delivered as if the backlight
+    were on, which is today's behavior.
+  - `notify` and `agent` requests reuse the existing wait-for-read path (`needs_backlight_read`,
+    `awaiting_probe_`), but only when the reading is stale. Hyprland signals get a small pending
+    list of their own.
+  - Lamp state (raise, clear) is never lost, only delayed by one read.
+  - Reads happen only when reactions do, at most one every 5 s, and never periodically.
 
 ### 5.8 Fullscreen through the rules engine
 
@@ -351,9 +396,11 @@ model the way submaps do today.
 **Commands:**
 - `omen-kbd notify [--app TEXT] [--desktop-entry TEXT] [--urgency low|normal|critical]`
   - `req::Notify`. Urgency is case-insensitive, because swaync sends `Low`, `Normal`, `Critical`.
-- `omen-kbd agent <waiting|working|done|end> --session ID [--source NAME] [--no-flash]`
+- `omen-kbd agent <waiting|working|done|end> --session ID [--window ADDR] [--source NAME]`
   - `req::Agent`. `source` defaults to `claude` and is informational for now.
-  - `--no-flash` is for `done` when the agent's terminal is focused.
+  - `--window` is the Hyprland address of the session's terminal window, when the hook found one.
+    The daemon uses it for the three window rules (§5.5) and to skip the `done` flash while that
+    window is focused, so the hook itself decides nothing about focus.
 
 **Wire format and exit codes:**
 - kebab-case JSON, like the existing requests: `{"cmd":"notify","app":…,"desktop-entry":…,"urgency":"normal"}`.
@@ -420,12 +467,17 @@ ttl_s = 3600             # (60–86400)
   - It is not a second swaync script entry, because swaync runs only one per notification.
 - **Claude Code:** `packaging/agent-hook/omen-kbd-agent-hook`, a bash + jq script that CMake
   installs next to the binary. It maps each hook to a state:
-  - `Notification` (`permission_prompt|idle_prompt|elicitation_dialog`) → `waiting`
-  - `UserPromptSubmit` and `PostToolUse` → `working`, only if a per-session marker in
-    `$XDG_RUNTIME_DIR/omen-kbd/agent/` says it was waiting
-  - `Stop` → `done`, with `--no-flash` when `hyprctl activewindow -j`'s `pid` is one of the hook's
-    ancestor processes (the session's own terminal is focused)
+  - `Notification` (`permission_prompt|idle_prompt|elicitation_dialog`) → `waiting --window ADDR`
+  - `UserPromptSubmit`, `PostToolUse` and `PostToolUseFailure` → `working`, only if a per-session
+    marker in `$XDG_RUNTIME_DIR/omen-kbd/agent/` says it was waiting
+  - `Stop` → `done --window ADDR`
   - `SessionEnd` → `end`
+
+  How it finds `ADDR`, once per session, cached next to the marker:
+  - walk the hook's ancestor processes and take the first whose pid owns a window in
+    `hyprctl clients -j`;
+  - no match (a multiplexer, a terminal that serves several windows from one process, or no window)
+    means no `--window`, and the lamp then falls back to the hooks and the TTL.
 
   Its rules:
   - It prints nothing, always exits 0, and caps each call with `timeout 1`.
@@ -462,7 +514,13 @@ ttl_s = 3600             # (60–86400)
     - a lamp held for 60 s adds 0;
     - locked, idle or off gives 0;
     - with an animated base, the number of frame changes over 1 s equals the effect's own, ±1;
-    - rate limit: 100 window events over a minute start ≤ 30 clips.
+    - rate limit: 100 window events over a minute start ≤ 30 clips;
+    - the window rules: `waiting` while its window is focused gives 0; focusing the window
+      afterwards clears it (+1); an urgent raise on the agent's window gives 0; `done` while its
+      window is focused gives 0.
+  - **Read before start**, in daemon tests with the mock backend: a stale reading triggers one read.
+    If the backlight reads off, the reaction writes 0; if it reads on, the reaction plays. Two
+    reactions within 5 s cause one read.
   - A few daemon-level tests with the mock backend check the wiring, using the current `wait_until`
     style.
 - **Hook script test:** feed sample JSON for each event to the script, with `OMEN_KBD_BIN` pointing
@@ -480,6 +538,9 @@ ttl_s = 3600             # (60–86400)
 | Claude Code's hook schema drifts | The script ignores missing fields, and its matchers can be edited in the snippet. |
 | The lamp stays amber because `idle_prompt` fires 60 s after every finished turn (background sessions included) | The 1-hour TTL, a new prompt, or `SessionEnd` clears it. If it gets noisy, the user drops `idle_prompt` from the matcher. |
 | Visual noise | Every reaction can be switched off on its own in config. |
+| An approval or denial made remotely (claude.ai, phone) never focuses the terminal | The lamp then clears when the tool finishes, at the next prompt, or by TTL. A long approved command keeps it amber until it ends. |
+| Background jobs share the interactive terminal's window | Focusing that terminal, where the job list lives, counts as seeing them. This is intended. |
+| Terminals with one process for many windows (foot server, kitty single-instance), or tmux and zellij, cannot be linked | No `--window`: the lamp falls back to the hooks and the TTL. This is not the user's setup today. |
 | A misbehaving app opens and closes windows all the time | The 500 ms cooldown plus the rolling-minute limit (§5.4). |
 
 ## 8. Live checks (each step approved by the user; normal daemon writes)
@@ -491,8 +552,13 @@ ttl_s = 3600             # (60–86400)
    match §2.
 3. **A ZapZap notification:** compare the app name and desktop entry with Hyprland's class, so
    skip-if-focused matches.
-4. **Claude lamp:** a permission prompt in a scratch session turns WASD amber; approving clears it;
-   finishing gives green, or no flash when its terminal is focused.
+4. **Claude lamp:** in a scratch session with another window focused:
+   - a permission prompt turns WASD amber after a few seconds;
+   - focusing the terminal clears it;
+   - finishing gives green, and no flash when the terminal is focused.
+
+   Also note whether the prompt makes Alacritty urgent. If it does, the absorb rule must keep the
+   right zone dark.
 
 ## 9. Left to the builder
 
@@ -525,3 +591,11 @@ ttl_s = 3600             # (60–86400)
   - Typed `notify` and `agent` commands, not a generic event command.
   - Reactions off unless `[reactions]` is present.
   - Answering `notify` and `agent` without waiting for the write.
+  - From the builder check:
+    - **The lamp clears when you focus that session's terminal, and does not light while it is
+      focused.** In practice this matches "goes back when you answer", because nothing fires at the
+      moment of approval. An urgent signal from the same window is absorbed.
+    - Read before start, with a 5 s freshness window.
+    - Using the delayed `permission_prompt` notification, not `PermissionRequest`.
+    - Adding `PostToolUseFailure` to the clears.
+    - The daemon, not the hook, decides the "finished" skip.
