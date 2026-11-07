@@ -323,3 +323,10 @@ Runbook: `docs/p5-install.md`. Kernel 7.2.14-arch1-1, BIOS F.21.
      (`202020 202020 202020 FF0000`, rule `gamemode`), and SUPER+F1 again brought `baseline` back.
 
   Afterwards `doctor`: all 10 checks OK. `last_error=0` throughout.
+- **Step 9, reboot with everything in place.**
+  - `systemctl reboot` at 18:20, with the RTC intact.
+  - Before login the keyboard showed `baseline`: the firmware kept the colors through the warm
+    reboot, and the module read them at load (backlight `0xe4`).
+  - The daemon autostarted at 18:21:10, the same second as Hyprland. hypridle and Waybar were running.
+  - `doctor` all OK, and no kernel errors.
+  - Soak start at 18:21:40: daemon CPU 23 ms, RSS 7.7 MB, module `writes_total=4`.
