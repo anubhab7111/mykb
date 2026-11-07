@@ -262,3 +262,26 @@ Runbook: `docs/p5-install.md`. Kernel 7.2.14-arch1-1, BIOS F.21.
     standard "on"; the light did not change.
   - The keyboard looked the same (user-confirmed).
   - `status` showed `baseline`, `hp-omen-kbd`, on. No journal warnings and no kernel errors.
+- **Step 6, CLI and Fn key.**
+  - Every command did what it should with one write each and `last_error=0`: `set`, `profile`,
+    `brightness 30`/`100`, `off`/`on` (`0x64`/`0xe4`), `profile baseline`, and `effect wave`
+    refused with exit code 1. All user-confirmed.
+  - **Fn key, first run: one toggle went the wrong way.** After an Fn off, `status` correctly said
+    off. Then one `toggle` recorded "off" and wrote `0x64` instead of turning the light on, and the
+    restart that followed started the daemon "off".
+  - **Two diagnosis runs did not reproduce it** (`~/omen-kbd-p5/step6-fn*.log`):
+    - one with `on` just before the Fn press;
+    - one replaying step 6's exact order (`on`, `profile white`, `profile baseline`, the refused
+      `effect wave`, then Fn and `status` at once).
+
+    In both, the live firmware reads were `0` while the light was dark and `1` while it was lit,
+    matching the user's eyes. `status` said off, and one `toggle` turned the light on and recorded on.
+  - Open: the first run's toggle is unexplained. A daemon test replays its command sequence against
+    the mock and passes.
+  - The daemon restart kept its saved state.
+- **Another total power loss between the diagnosis runs.**
+  - At the next boot the RTC read `2022-01-01 00:00:29`.
+  - The module loaded and read the firmware defaults `0F84FA 710FFA F9350F FAAC0F` with backlight
+    `0x00`.
+  - The daemon was not autostarted yet (step 8), so the user started it by hand. Its first frame put
+    `baseline` back from `state.json`.
