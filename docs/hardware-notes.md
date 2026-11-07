@@ -330,3 +330,30 @@ Runbook: `docs/p5-install.md`. Kernel 7.2.14-arch1-1, BIOS F.21.
   - The daemon autostarted at 18:21:10, the same second as Hyprland. hypridle and Waybar were running.
   - `doctor` all OK, and no kernel errors.
   - Soak start at 18:21:40: daemon CPU 23 ms, RSS 7.7 MB, module `writes_total=4`.
+- **Step 10, one hour of normal use (18:21–19:21).**
+  - The daemon never restarted (same pid).
+  - CPU grew 216 ms over the hour, and RSS stayed 7748 KiB.
+  - The module counted 77 writes in the hour: hints, locks, Waybar clicks and one profile change,
+    nowhere near the 40000/hour budget.
+  - `last_error=0`, `budget_exhausted=0`, no kernel errors, `doctor` all OK.
+  - Nothing odd reported by the user.
+
+### P5 sign-off (2026-11-07)
+
+All ten steps passed. The package is installed, the module loads at every boot, udev gives the
+`omen-kbd` group write access, and the daemon autostarts with Hyprland. All six desktop hooks work.
+
+**Found during P5:**
+- **A normal power-off keeps the colors; a total power loss does not.** The colors live in memory
+  kept alive by standby power, so writes cannot wear out flash. The write budget and the effects
+  opt-in were kept only because this was unknown. Changing them is the user's call.
+- **With `colors = "vivid"`, two themes with the same hues look alike on the keyboard** (mocha
+  versus latte).
+
+**Still open:**
+- One toggle after an Fn-key off went the wrong way in the first step 6 run. Two diagnosis runs did
+  not reproduce it.
+- A Hyprland killed while locked or idle leaves that gate on. Clear it with
+  `omen-kbd flag locked off; omen-kbd idle off`.
+- On-battery rules and the effect pause on battery are untested: the battery is dead.
+- The daemon does not save the game-mode flag across its own restarts.

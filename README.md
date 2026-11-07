@@ -18,7 +18,7 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 | Daemon, CLI, Waybar stream, Hyprland hook, `doctor` | Done. Tested against a mock backend and fake sysfs trees (GoogleTest, ASan + UBSan). |
 | Kernel module `hp_omen_kbd` | Tested in a VM against a firmware emulator, and validated on this laptop's real firmware (P4, 2026-11-06). The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
 | Hardware validation | Done (P4): `docs/hardware-validation.md`, results in `docs/hardware-notes.md`. |
-| Install and soak | In progress (P5), one approved step at a time: `docs/p5-install.md`. |
+| Install and soak | Done (P5, 2026-11-07): installed, autostarted, all desktop hooks working; results in `docs/hardware-notes.md`. |
 
 ## Safety
 
