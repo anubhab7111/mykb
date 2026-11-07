@@ -267,6 +267,26 @@ TEST_F(DaemonTest, ToggleAfterFnKeyOffTurnsTheLightOnInOnePress) {
     EXPECT_TRUE(status().on);
 }
 
+// P5 step 6 on the real keyboard: after these commands, Fn off, status, then one toggle left the
+// light off and recorded "off".
+TEST_F(DaemonTest, ToggleAfterFnKeyOffWorksAfterAnOffOnSequence) {
+    start(kStaticCfg);
+    ASSERT_TRUE(req(set({"#ff0000", "#00ff00", "#0000ff", "#ffffff"})).ok);
+    ASSERT_TRUE(req(req::Brightness{"30"}).ok);
+    ASSERT_TRUE(req(req::Brightness{"100"}).ok);
+    ASSERT_TRUE(req(req::Power{req::PowerAction::Off}).ok);
+    ASSERT_TRUE(req(req::Power{req::PowerAction::On}).ok);
+    ASSERT_TRUE(req(req::Profile{"plain"}).ok);
+    h().set_hw_backlight(false); // the Fn key
+    EXPECT_FALSE(status().on);
+    auto expected = h().ops();
+    const Response r = req(req::Power{req::PowerAction::Toggle});
+    EXPECT_TRUE(r.ok) << r.error.value_or("");
+    expected.push_back(MockOp::backlight_op(true));
+    EXPECT_EQ(h().ops(), expected) << "one backlight-on write";
+    EXPECT_TRUE(status().on);
+}
+
 TEST_F(DaemonTest, ToggleAfterFnKeyOnTurnsTheLightOffInOnePress) {
     start(kStaticCfg);
     ASSERT_TRUE(req(req::Power{req::PowerAction::Off}).ok);
