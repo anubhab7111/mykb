@@ -120,6 +120,8 @@ omen-kbd never edits these files itself.
    right-click to toggle, scroll for brightness.
 5. **Theme switches:** `rice-theme.md`.
 6. **Game mode:** `gamemode.lua`.
+7. **Rofi menu:** `kbd-menu.sh` (profile, brightness, power, effect, color, doctor). Install it as
+   `~/.local/bin/omen-kbd-menu` and bind it with the full path; the header comment has both lines.
 
 `omen-kbd doctor` lists what is still missing.
 
