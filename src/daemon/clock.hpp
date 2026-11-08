@@ -1,10 +1,4 @@
 #pragma once
+// The aliases live in core/clock.hpp, so the pure core needs no daemon header.
 
-#include <chrono>
-
-namespace omenkbd {
-
-using Clock = std::chrono::steady_clock;
-using TimePoint = Clock::time_point;
-
-} // namespace omenkbd
+#include "core/clock.hpp"
