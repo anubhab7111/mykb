@@ -24,11 +24,13 @@ Six reactions. The writes are counted on a static profile, and each write is one
 | 4 | Attention light | A window that is not focused asks for attention (Hyprland `urgent`) | The right zone in `theme:yellow` blinks twice (on, off, on, 150 ms each), then **holds steady** until every such window has been focused or closed | 4 per episode | More urgent windows while it is lit cost 0. |
 | 5 | Fullscreen video | The focused window is in true fullscreen, and its app class is in a list (default `mpv`, `vlc`, `firefox`, `chromium`) | Brightness capped at 15% (a rule) | 1 on entering, 1 on leaving | Hyprland's repeated `fullscreen` events cost 0, because the state is compared, not counted. |
 | 6 | Notification flash | swaync receives a notification | Every zone blinks once for 150 ms: `theme:red` if critical, the app's color from a table (ZapZap `theme:green`, Discord `#5865f2`), otherwise `theme:blue` | 2 | At most one flash waits in a queue, so a burst costs ≤ 4. |
-| 7 | Claude lamp: waiting | Any Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then **holds steady** until you focus that session's terminal window, or the session continues, finishes or ends. If that terminal is already focused, it does not light at all. | 4 per episode, 0 if you are looking | More sessions waiting while it is lit cost 0. |
+| 7 | Claude lamp: waiting | Any Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then **holds steady** until the session continues, finishes or ends. For a session started directly in a terminal it also clears when you focus that terminal, and does not light at all while that terminal is already focused. | 4 per episode, 0 if you are looking at a linked session | More sessions waiting while it is lit cost 0. |
 | 8 | Claude lamp: finished | A Claude Code session finishes its turn | WASD blinks once, 150 ms, `theme:green`. Skipped if that session's terminal window is focused. | 2 | Queued like #6. |
 
-How the lamp knows a session's terminal: the hook finds its terminal window (§5.12), and the daemon
-uses that window in three ways:
+How the lamp knows a session's terminal: the hook finds the terminal window, but **only for a
+session started directly in a terminal** (§5.12). Background jobs and other nested sessions have no
+link, so their lamp lights and flashes whatever is focused. For a linked session, the daemon uses the
+window in three ways:
 - it decides #8's skip;
 - it clears #7 on focus;
 - it lets the lamp **absorb an urgent signal from the same window**. If Claude rings the bell and
@@ -474,10 +476,18 @@ ttl_s = 3600             # (60–86400)
   - `SessionEnd` → `end`
 
   How it finds `ADDR`, once per session, cached next to the marker:
-  - walk the hook's ancestor processes and take the first whose pid owns a window in
+  - find the session's own `claude` process, the nearest `claude` among the hook's ancestors;
+  - **if that process's parent is another `claude` process, the session is nested** (a background
+    job or subagent), so pass **no** `--window`;
+  - otherwise keep walking up and take the first ancestor whose pid owns a window in
     `hyprctl clients -j`;
   - no match (a multiplexer, a terminal that serves several windows from one process, or no window)
-    means no `--window`, and the lamp then falls back to the hooks and the TTL.
+    also means no `--window`, and the lamp then falls back to the hooks and the TTL.
+
+  The ancestry source (normally `/proc`) is overridable, so tests can supply fake process trees.
+
+  Here, the interactive session `claude` 3795 sits under `bash` 3568 under Alacritty 3544, so it is
+  linked. The background jobs sit under `claude` 3872, so they are not.
 
   Its rules:
   - It prints nothing, always exits 0, and caps each call with `timeout 1`.
@@ -524,8 +534,11 @@ ttl_s = 3600             # (60–86400)
   - A few daemon-level tests with the mock backend check the wiring, using the current `wait_until`
     style.
 - **Hook script test:** feed sample JSON for each event to the script, with `OMEN_KBD_BIN` pointing
-  at a fake that records its arguments. Assert the calls, assert that nothing is printed, and assert
-  exit 0 even when the fake fails or is missing. shellcheck must pass.
+  at a fake that records its arguments.
+  - Assert the calls, including `--window` for a top-level session and none for a nested one, using
+    fake process trees.
+  - Assert that nothing is printed, and assert exit 0 even when the fake fails or is missing.
+  - shellcheck must pass.
 - **Live checks** (§8), with the user present.
 
 ## 7. Risks
@@ -539,7 +552,7 @@ ttl_s = 3600             # (60–86400)
 | The lamp stays amber because `idle_prompt` fires 60 s after every finished turn (background sessions included) | The 1-hour TTL, a new prompt, or `SessionEnd` clears it. If it gets noisy, the user drops `idle_prompt` from the matcher. |
 | Visual noise | Every reaction can be switched off on its own in config. |
 | An approval or denial made remotely (claude.ai, phone) never focuses the terminal | The lamp then clears when the tool finishes, at the next prompt, or by TTL. A long approved command keeps it amber until it ends. |
-| Background jobs share the interactive terminal's window | Focusing that terminal, where the job list lives, counts as seeing them. This is intended. |
+| Background jobs run under the interactive session's process, in the same terminal | The hook links only sessions started directly in a terminal. Nested ones get no link, so their lamp lights and their "finished" flash shows even while that terminal is focused. |
 | Terminals with one process for many windows (foot server, kitty single-instance), or tmux and zellij, cannot be linked | No `--window`: the lamp falls back to the hooks and the TTL. This is not the user's setup today. |
 | A misbehaving app opens and closes windows all the time | The 500 ms cooldown plus the rolling-minute limit (§5.4). |
 
@@ -556,6 +569,8 @@ ttl_s = 3600             # (60–86400)
    - a permission prompt turns WASD amber after a few seconds;
    - focusing the terminal clears it;
    - finishing gives green, and no flash when the terminal is focused.
+
+   - a background job that waits while the terminal **is** focused still lights the lamp.
 
    Also note whether the prompt makes Alacritty urgent. If it does, the absorb rule must keep the
    right zone dark.
@@ -592,9 +607,10 @@ ttl_s = 3600             # (60–86400)
   - Reactions off unless `[reactions]` is present.
   - Answering `notify` and `agent` without waiting for the write.
   - From the builder check:
-    - **The lamp clears when you focus that session's terminal, and does not light while it is
-      focused.** In practice this matches "goes back when you answer", because nothing fires at the
-      moment of approval. An urgent signal from the same window is absorbed.
+    - **For a session started directly in a terminal, the lamp clears when you focus that
+      terminal, and does not light while it is focused.** In practice this matches "goes back when
+      you answer", because nothing fires at the moment of approval. An urgent signal from the same
+      window is absorbed. Background jobs are never linked.
     - Read before start, with a 5 s freshness window.
     - Using the delayed `permission_prompt` notification, not `PermissionRequest`.
     - Adding `PostToolUseFailure` to the clears.
