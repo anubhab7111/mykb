@@ -12,9 +12,9 @@
 # Rules this script keeps, because it runs inside Claude Code:
 #   - It prints nothing at all and always exits 0. A UserPromptSubmit hook's stdout would reach the
 #     model's context, and a non-zero exit can block Claude Code.
-#   - Every omen-kbd and hyprctl call is capped by `timeout`, so a hung daemon or a hung Hyprland
-#     (it hangs after a wake on this machine) cannot stall a session. Hooks marked async have no
-#     timeout of their own, so this cap is the only bound.
+#   - Every omen-kbd and hyprctl call is capped at about 1 s (1.5 s worst case: `timeout -k 0.5 1`),
+#     so a hung daemon or a hung Hyprland (it hangs after a wake on this machine) cannot stall a
+#     session. Hooks marked async have no timeout of their own, so this cap is the only bound.
 #   - Missing jq, bad JSON, or a missing or unsafe session_id make it do nothing.
 #   - It reads only the event name, the session id and the notification type. It never stores or
 #     logs the input.
@@ -66,7 +66,8 @@ cache=$dir/$session.window
 bin=${OMEN_KBD_BIN:-${HOME:-}/.local/bin/omen-kbd}
 window=
 
-# send <omen-kbd args>: one call, capped at 1 s (then SIGKILL half a second later).
+# send <omen-kbd args>: one call, capped at about 1 s (1.5 s worst case: SIGKILL half a second
+# after the SIGTERM at 1 s).
 send() {
     timeout -k 0.5 1 "$bin" "$@" </dev/null
 }

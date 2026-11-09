@@ -1,5 +1,4 @@
 {
-  "_comment": "omen-kbd: merge the six entries under \"hooks\" into ~/.claude/settings.json, next to your existing SessionStart hook (add these keys to your \"hooks\" object; keep the others), and leave out this _comment line. Install the script first: cmake --install build --prefix ~/.local puts it at ~/.local/bin/omen-kbd-agent-hook. It prints nothing and always exits 0. async runs a hook in the background so it cannot slow Claude Code; it is set on the three busy events only; Notification, Stop and SessionEnd stay synchronous so the waiting, done and end signals keep their order.",
   "hooks": {
     "Notification": [
       {
