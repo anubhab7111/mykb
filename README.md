@@ -19,6 +19,7 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 | Kernel module `hp_omen_kbd` | Tested in a VM against a firmware emulator, and validated on this laptop's real firmware (P4, 2026-11-06). The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
 | Hardware validation | Done (P4): `docs/hardware-validation.md`, results in `docs/hardware-notes.md`. |
 | Install and soak | Done (P5, 2026-11-07): installed, autostarted, all desktop hooks working; results in `docs/hardware-notes.md`. |
+| Reactions | Built and unit-tested against the mock backend and fake Hyprland, swaync and Claude Code inputs ([Reactions](#reactions)). The three producer snippets are not applied yet, and the live checks on the real keyboard are pending. |
 
 ## Safety
 
@@ -86,6 +87,8 @@ kill %2 %1
 | `waybar` | Stream status lines for a Waybar custom module. |
 | `doctor` | Read-only checks: driver and `readonly`, permissions, competing writers, hp-wmi DKMS packages, daemon, hooks, theme. |
 | `gen-hyprland` | Print the Hyprland hook (`kbdlight.lua`) for mode colors. |
+| `notify [--app TEXT] [--desktop-entry TEXT] [--urgency low\|normal\|critical]` | Report a desktop notification, for the notification flash. Used by `rice-notify-sound` (`notify-reaction.sh`). Urgency is case-insensitive. |
+| `agent <waiting\|working\|done\|end> --session ID [--window ADDR] [--source NAME]` | Report what a coding-agent session is doing, for the Claude lamp. Used by `omen-kbd-agent-hook`. `--window` is the Hyprland address of the session's terminal; `--source` defaults to `claude`. |
 | `daemon [--backend auto\|mock\|hp-omen-kbd\|mainline-led] [--mock-render] [--no-sources]` | Run the daemon. `auto` only picks a real backend. |
 
 Exit codes: `0` ok; `1` the daemon or the keyboard write reported an error (message on stderr), or
@@ -99,6 +102,57 @@ Exit codes: `0` ok; `1` the daemon or the keyboard write reported an error (mess
 - `~/.local/state/omen-kbd/state.json`: current profile, custom colors, brightness, on/off and the
   lifetime write counter. Written atomically, at most once a second.
 - `$XDG_RUNTIME_DIR/omen-kbd.sock`: the daemon's socket (mode 0600, JSON lines).
+
+## Reactions
+
+Short keyboard reactions to what happens on the desktop. Each one has a small, fixed write cost, and
+the tests pin those costs. They are driven by the `[reactions]` tables in `config.toml`; a missing
+`[reactions]` table means they are off.
+
+| Reaction | When | What the keyboard does | Writes |
+|---|---|---|---|
+| Workspace sweep | You switch workspace | The accent color (`theme:lavender`) lights one zone at a time, left to right going up, right to left going down, 120 ms a step. WASD lights with the left zone. | 4 |
+| Window opened | A window opens | Every zone moves 50% toward white for 120 ms. | 2 |
+| Window closed | A window closes | Every zone dips to 35% for 120 ms. | 2 |
+| Attention light | A window that is not focused asks for attention (Hyprland `urgent`) | The right zone in `theme:yellow` blinks twice, then holds steady until every such window has been focused or closed. | 4 per episode |
+| Fullscreen video | The focused window is in true fullscreen and its class is in the rule's list (`mpv`, `vlc`, `firefox`, `chromium`) | Brightness is capped at 15% by a rule. Super+F only maximizes and does not count. | 1 in, 1 out |
+| Notification flash | swaync receives a notification | Every zone blinks once for 150 ms: `theme:red` if critical, the app's color from a table (ZapZap `theme:green`, Discord `#5865f2`), otherwise `theme:blue`. | 2 |
+| Claude lamp: waiting | A Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then holds steady until the session continues, finishes or ends. | 4 per episode |
+| Claude lamp: finished | A Claude Code session finishes its turn | WASD blinks once for 150 ms in `theme:green`. | 2 |
+
+- **Holding costs nothing.** The two waiting lights (attention, Claude) blink and then hold a steady
+  color. They never pulse, so a lamp that stays lit for hours writes nothing more.
+- **Bursts are bounded.** Workspace switches during a sweep are absorbed. Window pulses are limited
+  to one per 500 ms. At most one flash waits in a queue. More windows or sessions asking for
+  attention while a lamp is lit cost 0. `max_per_minute` caps all the short reactions.
+- **Silent cases cost 0 writes.** Reactions are off; the keyboard is dark (backlight off after the
+  Fn key, brightness 0, lid closed, locked or idle with the gate set to `off`, suspended); or the
+  hourly write budget is spent. The short reactions also stay silent while you are away (locked or
+  idle) and are dropped, not saved. Notifications are skipped during do-not-disturb, for low
+  urgency, and when the notifying app is the focused window. A lamp keeps its state while silent
+  and shows steady, with no blinks, when the keyboard is visible again.
+- **On top of a running effect** reactions add no writes: the effect's own ticks carry them, so a
+  step may land up to one tick late (about 100 ms).
+- **Claude lamp and focus.** For a session started directly in a terminal, the hook reports that
+  terminal's Hyprland window. The lamp then does not light while that terminal is focused, clears
+  when you focus it, and the "finished" flash is skipped while it is focused. Background and nested
+  sessions have no window link, so their lamp and flash show whatever is focused. The same goes for
+  tmux, zellij and terminals that serve several windows from one process.
+- **Layers, bottom to top:** profile or effect, rule overlay, lamps, mode hint (Super, Ctrl,
+  submap), short reaction, brightness caps and the backlight gates. A held modifier hides the lamps
+  while it is held; a notification during fullscreen video flashes at the dimmed brightness.
+- **Turning things off.** `enabled = false` turns everything off. One reaction goes off with its own
+  neutral value: `open = 0`, `close = 1`, or `blinks = 0` together with `zones = []`. Colors are
+  `#rrggbb` or `theme:<name>`.
+- **What is never read or kept.** Keystrokes, window titles, notification text, Claude prompts and
+  replies. Only a window's address and class are used, in memory. The Hyprland parser drops titles
+  before anything else sees them, and nothing from Hyprland, swaync or Claude Code is logged except
+  errors. The hook script reads three fields of its input (the event name, the session id and the
+  notification type), never stores the input, prints nothing and always exits 0.
+- **Producers are snippets.** omen-kbd never edits `config.toml`, `rice-notify-sound` or
+  `~/.claude/settings.json`; the three snippets in `packaging/snippets/` are listed under Desktop
+  integration. The Claude hook needs `jq`, and its tests need `bash` and `jq` (they skip without
+  `jq`, and the `shellcheck` test skips without `shellcheck`).
 
 ## Desktop integration
 
@@ -122,6 +176,20 @@ omen-kbd never edits these files itself.
 6. **Game mode:** `gamemode.lua`.
 7. **Rofi menu:** `kbd-menu.sh` (profile, brightness, power, effect, color, doctor). Install it as
    `~/.local/bin/omen-kbd-menu` and bind it with the full path; the header comment has both lines.
+8. **Reactions config:** `reactions-config.toml`. Paste it into `~/.config/omen-kbd/config.toml`
+   just before the rule named "power saver dims", then run `omen-kbd reload`. It holds the
+   `[reactions]` tables and the rule `fullscreen video dims`. Rules are first-match per category,
+   and both rules cap brightness, so the fullscreen rule has to come first.
+9. **Notification flash:** `notify-reaction.sh`. swaync runs only one script per notification, so
+   this replaces the subshell at the end of `rice-notify-sound` instead of being a second script.
+   It adds one `omen-kbd notify` line inside the not-in-do-not-disturb branch, next to the ping,
+   detached and with its output sent to `/dev/null`.
+10. **Claude lamp:** `claude-code-hooks.json` and the hook script. `cmake --install` puts
+    `omen-kbd-agent-hook` next to `omen-kbd`, in `~/.local/bin`; it needs `jq`. Merge the `hooks`
+    entries of the JSON file into `~/.claude/settings.json`, next to the existing `SessionStart`
+    hook, and leave out its `_comment` line. The three busy events (`UserPromptSubmit`,
+    `PostToolUse`, `PostToolUseFailure`) run with `"async": true`, so the hook cannot slow Claude
+    Code. Every `omen-kbd` and `hyprctl` call inside it is capped at 1 s.
 
 `omen-kbd doctor` lists what is still missing.
 

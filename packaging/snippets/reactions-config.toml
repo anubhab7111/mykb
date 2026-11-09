@@ -1,0 +1,55 @@
+# omen-kbd: keyboard reactions. Paste this whole file into ~/.config/omen-kbd/config.toml, just
+# before the `[[rules]]` entry named "power saver dims" (after "gamemode"), then run
+# `omen-kbd reload`.
+#
+# Why there: rules are first-match per category, and the fullscreen rule below sets a brightness cap
+# like "power saver dims" does, so it has to come first. TOML lets the [reactions] tables sit between
+# two [[rules]] entries.
+#
+# If you already have a [reactions] table, merge by hand: TOML allows each table only once.
+# Every key is optional; a missing [reactions] table means off. A reaction is turned off with its own
+# neutral value (`open = 0`, `close = 1`, `blinks = 0` with `zones = []`) or with `enabled = false`.
+# Colors are `#rrggbb` or `theme:<name>`.
+
+[reactions]
+enabled = true
+step_ms = 120            # one step of a sweep or pulse (60-1000)
+blink_ms = 150           # one on or off phase of a blink (60-1000)
+max_per_minute = 30      # short reactions started per rolling minute (1-600)
+
+[reactions.workspace]
+color = "theme:lavender"
+wasd_with = "left"       # "left" | "middle" | "none"
+
+[reactions.window]
+open = 0.5               # move toward white by this much (0-1; 0 = off)
+close = 0.35             # dip to this fraction (0-1; 1 = off)
+cooldown_ms = 500        # (0-10000)
+
+[reactions.notify]
+color = "theme:blue"
+critical = "theme:red"
+min_urgency = "normal"   # "low" | "normal" | "critical"
+skip_if_focused = true
+[reactions.notify.apps]  # matched case-insensitively; this table replaces the built-in apps
+zapzap = "theme:green"
+discord = "#5865f2"
+
+[reactions.urgent]
+zones = ["right"]        # [] turns the lamp off
+color = "theme:yellow"
+blinks = 2               # (0-5); then steady
+
+[reactions.agent]
+zones = ["wasd"]         # [] turns the lamp off
+waiting = "theme:peach"
+done = "theme:green"
+blinks = 2               # (0-5); then steady
+ttl_s = 3600             # (60-86400)
+
+# Brightness cap while a listed app is in true fullscreen (Super+Shift+F, or the player's own
+# fullscreen button; Super+F only maximizes and does not count). "*" in the list matches any app.
+[[rules]]
+name = "fullscreen video dims"
+when = { fullscreen_app = ["mpv", "vlc", "firefox", "chromium"] }
+brightness_cap = 15
