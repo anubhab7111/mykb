@@ -276,7 +276,11 @@ model the way submaps do today.
   - Focusing a window clears every key linked to it.
   - An agent key is not recorded if its window is already focused when it is raised.
   - An urgent raise for a window that already has an agent key is absorbed: no second light for one
-    event.
+    event. The reverse holds too: raising an agent key for a window drops any urgent key linked to
+    that window. The `permission_prompt` hook fires about 6 s after the prompt, so the terminal's
+    urgent signal usually arrives first, and the agent lamp then replaces it (a window never holds
+    keys of both kinds). The attention light has already blinked by then; the replacement costs no
+    extra write, because it rides on the agent lamp's first frame.
 - API (pure):
   - `raise(kind, key, now, std::optional<std::string> window)`, `clear(kind, key)`,
     `clear_window(window)`, `clear_kind(kind)`, `expire(now)`
