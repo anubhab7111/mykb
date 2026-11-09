@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# omen-kbd-agent-hook: tells the omen-kbd daemon what a Claude Code session is doing, so the keyboard
+# can light "waiting for you" and flash "finished". Claude Code runs it for six hook events and
+# passes the event as JSON on stdin; the settings block is packaging/snippets/claude-code-hooks.json.
+#
+#   Notification (permission_prompt, idle_prompt, elicitation_dialog)  -> agent waiting
+#   UserPromptSubmit, PostToolUse, PostToolUseFailure                  -> agent working
+#                                                    (only if this session was waiting)
+#   Stop                                                               -> agent done
+#   SessionEnd                                                         -> agent end
+#
+# Rules this script keeps, because it runs inside Claude Code:
+#   - It prints nothing at all and always exits 0. A UserPromptSubmit hook's stdout would reach the
+#     model's context, and a non-zero exit can block Claude Code.
+#   - Every omen-kbd and hyprctl call is capped by `timeout`, so a hung daemon or a hung Hyprland
+#     (it hangs after a wake on this machine) cannot stall a session. Hooks marked async have no
+#     timeout of their own, so this cap is the only bound.
+#   - Missing jq, bad JSON, or a missing or unsafe session_id make it do nothing.
+#   - It reads only the event name, the session id and the notification type. It never stores or
+#     logs the input.
+#
+# Files (all under $XDG_RUNTIME_DIR/omen-kbd/agent/, removed at SessionEnd):
+#   <session>.waiting  marker: this session is waiting, so its next activity sends "working"
+#   <session>.window   the session's terminal window address, found once (an empty file: none)
+#
+# The terminal window is found by walking up from the hook's parent process:
+#   1. the nearest ancestor named `claude` is the session itself (a `sh` in between is skipped);
+#   2. if that process's parent is also `claude`, the session is nested (a background session
+#      under its host), so there is no window to report;
+#   3. otherwise the nearest ancestor that owns exactly one window in `hyprctl clients -j` is the
+#      terminal. A process that owns several windows (a terminal server) cannot say which one is
+#      the session's, so that also reports none.
+#
+# Environment overrides, for tests:
+#   OMEN_KBD_BIN         omen-kbd binary             (default $HOME/.local/bin/omen-kbd)
+#   OMEN_KBD_PROC        process tree to walk        (default /proc)
+#   OMEN_KBD_START_PID   where the walk starts       (default the hook's parent, $PPID)
+#   OMEN_KBD_HYPRCTL     hyprctl binary              (default hyprctl)
+#   OMEN_KBD_AGENT_COMM  the session's process name  (default claude)
+#   XDG_RUNTIME_DIR      where the markers live; unset means do nothing
+set -u
+umask 077
+trap 'exit 0' EXIT
+exec >/dev/null 2>&1
+
+command -v jq >/dev/null || exit 0
+runtime=${XDG_RUNTIME_DIR:-}
+[ -n "$runtime" ] || exit 0
+
+# One jq call yields the three fields, one per line; anything that is not a single-line string
+# becomes empty.
+fields=$(jq -r 'def s: if type == "string" and (contains("\n") | not) then . else "" end;
+    try ((.hook_event_name | s), (.session_id | s), (.notification_type | s)) catch ""') || exit 0
+mapfile -t f <<<"$fields"
+event=${f[0]:-}
+session=${f[1]:-}
+notification_type=${f[2]:-}
+
+# The session id becomes a file name, so only plain ids are accepted.
+session_re='^[A-Za-z0-9_-]{1,128}$'
+[[ $session =~ $session_re ]] || exit 0
+
+dir=$runtime/omen-kbd/agent
+marker=$dir/$session.waiting
+cache=$dir/$session.window
+bin=${OMEN_KBD_BIN:-${HOME:-}/.local/bin/omen-kbd}
+window=
+
+# send <omen-kbd args>: one call, capped at 1 s (then SIGKILL half a second later).
+send() {
+    timeout -k 0.5 1 "$bin" "$@" </dev/null
+}
+
+# find_window: sets $window to the session's terminal window address, or to "" when it has none.
+find_window() {
+    local proc=${OMEN_KBD_PROC:-/proc}
+    local want=${OMEN_KBD_AGENT_COMM:-claude}
+    local hyprctl=${OMEN_KBD_HYPRCTL:-hyprctl}
+    local address_re='^0x[0-9a-fA-F]+$'
+    local pid=${OMEN_KBD_START_PID:-$PPID}
+    local seen=" " state=seek stat comm ppid i json
+    local -a chain=()
+
+    window=
+    if [ -r "$cache" ]; then
+        read -r window <"$cache"
+        [[ $window =~ $address_re ]] || window=
+        return
+    fi
+
+    # chain collects the ancestors above the session's claude, nearest first.
+    for ((i = 0; i < 64; i++)); do
+        [[ $pid =~ ^[0-9]+$ ]] && [ "$pid" -gt 1 ] || break
+        case $seen in *" $pid "*) break ;; esac
+        seen+="$pid "
+        stat=$(<"$proc/$pid/stat") || break
+        comm=${stat#*(}
+        comm=${comm%)*}
+        read -r _ ppid _ <<<"${stat##*) }"
+        case $state in
+        seek) [ "$comm" = "$want" ] && state=parent ;;
+        parent)
+            [ "$comm" = "$want" ] && break # a claude under a claude: a nested session
+            state=above
+            chain+=("$pid")
+            ;;
+        *) chain+=("$pid") ;;
+        esac
+        pid=$ppid
+    done
+
+    if [ ${#chain[@]} -gt 0 ]; then
+        json=$(timeout -k 0.5 1 "$hyprctl" clients -j </dev/null) || return
+        # The first ancestor in walk order that owns a window; "" when it owns more than one.
+        window=$(jq -r '. as $clients | ($ARGS.positional | map(tonumber)) as $chain
+            | first($chain[] as $pid | [$clients[] | select(.pid == $pid)] as $own
+                | select($own | length > 0)
+                | if ($own | length) == 1 then $own[0].address else "" end) // ""' \
+            --args "${chain[@]}" <<<"$json") || {
+            window=
+            return
+        }
+        [[ $window =~ $address_re ]] || window=
+    fi
+    # Lookups that failed returned above, so a Hyprland hiccup is retried at the next event.
+    printf '%s\n' "$window" >"$cache"
+}
+
+# window_args: the --window argument for omen-kbd, when there is a window.
+window_args() {
+    find_window
+    window_arg=()
+    if [ -n "$window" ]; then
+        window_arg=(--window "$window")
+    fi
+}
+
+case $event in
+Notification)
+    case $notification_type in
+    permission_prompt | idle_prompt | elicitation_dialog) ;;
+    *) exit 0 ;;
+    esac
+    [ -d "$dir" ] || mkdir -p "$dir"
+    : >"$marker"
+    window_args
+    send agent waiting --session "$session" "${window_arg[@]}" --source claude
+    ;;
+UserPromptSubmit | PostToolUse | PostToolUseFailure)
+    [ -e "$marker" ] || exit 0
+    rm -f -- "$marker"
+    send agent working --session "$session"
+    ;;
+Stop)
+    [ -d "$dir" ] || mkdir -p "$dir"
+    rm -f -- "$marker"
+    window_args
+    send agent "done" --session "$session" "${window_arg[@]}"
+    ;;
+SessionEnd)
+    rm -f -- "$marker" "$cache"
+    send agent end --session "$session"
+    ;;
+esac
+exit 0

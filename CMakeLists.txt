@@ -51,6 +51,7 @@ target_compile_options(hokcore PRIVATE ${HOK_C_WARNINGS})
 add_executable(omen-kbd ${CMAKE_SOURCE_DIR}/src/main.cpp)
 target_link_libraries(omen-kbd PRIVATE omenkbd)
 install(TARGETS omen-kbd RUNTIME DESTINATION bin)
+install(PROGRAMS ${CMAKE_SOURCE_DIR}/packaging/agent-hook/omen-kbd-agent-hook DESTINATION bin)
 
 enable_testing()
 file(GLOB OMENKBD_TESTS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/*.cpp)
