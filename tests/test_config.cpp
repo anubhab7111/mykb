@@ -15,6 +15,13 @@ TEST(Config, ExampleConfigParses) {
     EXPECT_EQ(c.rules.size(), 3u);
 }
 
+TEST(Config, EmbeddedDefaultEnablesReactions) {
+    const Config c = embedded_default();
+    EXPECT_TRUE(c.reactions.enabled);
+    EXPECT_EQ(c.reactions.step_ms, 120u);
+    EXPECT_EQ(c.reactions.notify.apps.size(), 2u);
+}
+
 TEST(Config, MissingFileGivesDefault) {
     const auto c = load_config("/nonexistent/x.toml");
     ASSERT_TRUE(c.has_value()) << c.error();

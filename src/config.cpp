@@ -290,7 +290,8 @@ std::expected<Config, std::string> parse_config(std::string_view text) {
             std::format("TOML error at line {}: {}", e.source().begin.line, e.description()));
     }
     OMENKBD_TRY(check_keys(
-        root, {"device", "effects", "theme", "gates", "hints", "profiles", "rules"}, ""));
+        root, {"device", "effects", "theme", "gates", "hints", "reactions", "profiles", "rules"},
+        ""));
 
     Config c;
     std::string theme_dir = "~/.config/theming/current";
@@ -321,6 +322,15 @@ std::expected<Config, std::string> parse_config(std::string_view text) {
         return Err(s.error());
     } else if (*s != nullptr) {
         OMENKBD_TRY(parse_hints(**s, c.hints));
+    }
+    if (auto s = section("reactions"); !s) {
+        return Err(s.error());
+    } else if (*s != nullptr) {
+        auto r = parse_reactions(**s);
+        if (!r) {
+            return Err(r.error());
+        }
+        c.reactions = std::move(*r);
     }
 
     if (const toml::array *profiles = root["profiles"].as_array()) {
