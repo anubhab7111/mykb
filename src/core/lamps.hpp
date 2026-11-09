@@ -46,15 +46,21 @@ class LampSet {
 
     /// Lights `kind` for `key`, linked to `window` when given. A kind that had no keys starts an
     /// intro at `now` when `play_intro` is set; a kind already lit never does. Raising a key the
-    /// kind already holds only refreshes its TTL. Ignored when the kind has no zones, and for an
-    /// `Urgent` key whose `window` an `Agent` key already carries.
+    /// kind already holds only refreshes its TTL. Ignored when the kind has no zones: it changes
+    /// nothing.
+    ///
+    /// A window shows one light, the `Agent` one:
+    ///   - an `Urgent` raise is ignored when an `Agent` key already carries its `window`;
+    ///   - an `Agent` raise drops every `Urgent` key carrying its `window`, whether the key is new
+    ///     or already held.
+    /// So a window never holds keys of both kinds. A raise without a window never meets a rule.
     void raise(LampKind kind, std::string key, std::optional<std::string> window, TimePoint now,
                bool play_intro);
 
     /// Drops one key; the kind goes dark with its last key.
     void clear(LampKind kind, std::string_view key);
 
-    /// Drops every key linked to `window`, of both kinds.
+    /// Drops every key linked to `window`.
     void clear_window(std::string_view window);
 
     /// Drops every key of `kind`.
