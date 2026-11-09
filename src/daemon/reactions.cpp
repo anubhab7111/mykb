@@ -12,6 +12,12 @@ template <class... Fs> struct Overloaded : Fs... {
     using Fs::operator()...;
 };
 
+/// An empty address is no window: Hyprland reports one when nothing has focus, and no key may be
+/// linked to it.
+std::optional<std::string> window_or_none(const std::optional<std::string> &window) {
+    return window && !window->empty() ? window : std::nullopt;
+}
+
 } // namespace
 
 Reactions::Reactions() : look_(cfg_, [](const ColorRef &) { return Rgb{}; }) {}
@@ -24,6 +30,9 @@ void Reactions::reconfigure(const ReactionsCfg &cfg, const Resolver &resolve) {
         lamps_.clear_kind(LampKind::Urgent);
         player_.clear();
         next_change_.reset();
+        // No focus event arrives while disabled, so what was focused then is stale.
+        focused_window_.clear();
+        focused_class_.clear();
     }
 }
 
@@ -113,8 +122,9 @@ void Reactions::handle(const Signal &sig, TimePoint now) {
                 offer(Channel::Notify, look_.notified(n, focused_class_), now);
             },
             [&](const signal::UrgentRaised &s) {
-                // The window with focus is being looked at already.
-                if (!is_focused(s.window)) {
+                // The window with focus is being looked at already. A window without an address
+                // could never be focused or closed, and the light has no TTL: it is dropped.
+                if (!s.window.empty() && !is_focused(s.window)) {
                     lamps_.raise(LampKind::Urgent, s.window, s.window, now, intro);
                 }
             },
@@ -123,17 +133,20 @@ void Reactions::handle(const Signal &sig, TimePoint now) {
             [&](const signal::FocusChanged &s) {
                 focused_window_ = s.window;
                 focused_class_ = s.app_class;
-                lamps_.clear_window(s.window);
+                if (!s.window.empty()) {
+                    lamps_.clear_window(s.window);
+                }
             },
             [&](const signal::AgentWaiting &s) {
-                if (!is_focused(s.window)) {
-                    lamps_.raise(LampKind::Agent, s.session, s.window, now, intro);
+                const std::optional<std::string> window = window_or_none(s.window);
+                if (!is_focused(window)) {
+                    lamps_.raise(LampKind::Agent, s.session, window, now, intro);
                 }
             },
             [&](const signal::AgentWorking &s) { lamps_.clear(LampKind::Agent, s.session); },
             [&](const signal::AgentDone &s) {
                 lamps_.clear(LampKind::Agent, s.session);
-                if (!is_focused(s.window)) {
+                if (!is_focused(window_or_none(s.window))) {
                     offer(Channel::AgentDone, look_.agent_done(), now);
                 }
             },

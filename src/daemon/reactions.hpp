@@ -39,7 +39,8 @@ class Reactions {
 
     /// Takes new settings. Lamp keys stay, with the new styles at once; a clip already playing
     /// finishes with the look it started with, and the next one has the new look. `enabled = false`
-    /// drops every lamp and clip. `resolve` is only used during the call.
+    /// drops every lamp and clip, and forgets the focused window. `resolve` is only used during the
+    /// call.
     void reconfigure(const ReactionsCfg &cfg, const Resolver &resolve);
 
     /// The palette changed: re-resolves the colors of the settings kept by the last `reconfigure`.
@@ -49,7 +50,8 @@ class Reactions {
 
     /// Takes the signal `sig` at `now`. Ignored while disabled. Short reactions and lamp intros
     /// need `short_ok`, which is a visible keyboard and a present user; without it a lamp lights
-    /// steadily at once and a clip is not played.
+    /// steadily at once and a clip is not played. An empty window address counts as no window: an
+    /// `UrgentRaised` without one is dropped, and a `FocusChanged` to none clears no light.
     void on_signal(const Signal &sig, TimePoint now, Visibility visibility);
 
     /// Moves time on and applies the visibility: expires lamps, advances the player and drops the
