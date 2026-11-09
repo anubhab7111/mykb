@@ -128,11 +128,24 @@ The order has three consequences:
   - `fullscreen>>0|1`. The wiki warns it "is not guaranteed to fire on/off once in succession"; some
     windows fire it several times.
   - The wiki does not say whether commas in titles or workspace names are escaped.
+  - **Observed on this machine** (the socket2 spike, 2026-11-10; titles were never logged):
+    - Every focus event arrives as `activewindow>>CLASS,TITLE`, then `activewindowv2>>ADDRESS`, then
+      `windowtitle` and `windowtitlev2`. The class line comes first.
+    - Addresses in events are lowercase hex **without** `0x` (for example `55666f363b20`). The
+      request socket's `hyprctl clients -j` includes `0x`.
+    - A title change of the **focused** window re-emits `activewindow` and `activewindowv2` with the
+      same address: 17 pairs in 20 s while the user stayed in one terminal. A repeated
+      `activewindowv2` for the already focused address is therefore not a focus change, and the
+      tracker ignores it (no signal, no fullscreen check).
+    - Not observed yet: `workspacev2`, `openwindow`, `closewindow`, `urgent` and `fullscreen`
+      events (those steps were not done during the 20 s).
 - **Hyprland request socket** (`.socket.sock`, same directory as socket2): `j/activewindow` returns
   the JSON that `hyprctl activewindow -j` prints, with `class` and `fullscreen` (a mode number).
   - What is known so far: with nothing fullscreen the value is `0`.
   - What still needs checking: which values mean true fullscreen and which mean Super+F's
-    maximize. This is the first task of the plan (§8).
+    maximize. The 2026-11-10 poll saw only `0` (the key presses missed its 40 s window), so this is
+    still open. Until it is confirmed the predicate is `(fullscreen & 2) != 0` (Hyprland's mode
+    bits: 1 maximized, 2 fullscreen), isolated in one function.
 - **The user's Hyprland config:**
   - Super+F is `fullscreen({ mode = "maximized" })`, which must not dim.
   - Super+Shift+F is `fullscreen({ mode = "fullscreen" })`.
@@ -490,11 +503,16 @@ ttl_s = 3600             # (60–86400)
 
   The ancestry source (normally `/proc`) is overridable, so tests can supply fake process trees.
 
-  Here, the interactive session `claude` 3795 sits under `bash` 3568 under Alacritty 3544, so it is
-  linked. The background jobs sit under `claude` 3872, so they are not.
+  Verified on this machine (2026-11-08): the interactive session is one `claude` process directly
+  under the shell (Alacritty ← `bash` ← `claude`), so it is linked. A background session is a
+  `claude bg-pty-host` (the host) with a `claude --session-id … --agent claude` child (the session),
+  under `claude daemon run --origin transient`, which the interactive `claude` started; idle spares
+  are `bg-pty-host` ← `bg-spare`. Every one of these reports `comm` = `claude`, so the nested rule
+  marks exactly the background sessions.
 
   Its rules:
-  - It prints nothing, always exits 0, and caps each call with `timeout 1`.
+  - It prints nothing, always exits 0, and caps each call at about 1 s (`timeout -k 0.5 1`, so
+    1.5 s in the worst case).
   - `OMEN_KBD_BIN` overrides the binary path, for tests.
   - Missing fields make it do nothing.
 - **Settings:** `packaging/snippets/claude-code-hooks.json` holds the `hooks` block the user merges
