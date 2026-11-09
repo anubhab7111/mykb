@@ -20,6 +20,11 @@ LayerOps steady(const LampStyle &style) {
     return ops;
 }
 
+/// True when the key of a `keys` map entry is linked to `window`.
+bool linked_to(const auto &entry, std::string_view window) {
+    return entry.second.window && *entry.second.window == window;
+}
+
 /// An intro that is still playing: its clip, when it began and how far in it is.
 struct Intro {
     Clip clip;
@@ -74,12 +79,18 @@ void LampSet::raise(LampKind kind, std::string key, std::optional<std::string> w
     if (s.style.zones.empty()) {
         return;
     }
-    if (kind == LampKind::Urgent && window) {
-        const auto &agent_keys = slot(LampKind::Agent).keys;
-        const bool absorbed = std::ranges::any_of(
-            agent_keys, [&window](const auto &entry) { return entry.second.window == window; });
-        if (absorbed) {
-            return;
+    if (window) {
+        if (kind == LampKind::Urgent) {
+            const auto &agent_keys = slot(LampKind::Agent).keys;
+            const bool absorbed = std::ranges::any_of(
+                agent_keys, [&window](const auto &entry) { return linked_to(entry, *window); });
+            if (absorbed) {
+                return;
+            }
+        } else {
+            // The agent light replaces the urgent one of its window, so the window shows one light.
+            std::erase_if(slot(LampKind::Urgent).keys,
+                          [&window](const auto &entry) { return linked_to(entry, *window); });
         }
     }
     if (const auto it = s.keys.find(key); it != s.keys.end()) {
@@ -101,9 +112,7 @@ void LampSet::clear(LampKind kind, std::string_view key) {
 
 void LampSet::clear_window(std::string_view window) {
     for (Slot &s : slots_) {
-        std::erase_if(s.keys, [window](const auto &entry) {
-            return entry.second.window && *entry.second.window == window;
-        });
+        std::erase_if(s.keys, [window](const auto &entry) { return linked_to(entry, window); });
     }
 }
 

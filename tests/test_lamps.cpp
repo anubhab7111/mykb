@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 #include <initializer_list>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace omenkbd;
@@ -274,26 +276,111 @@ TEST(LampSet, NextChangeFollowsTheEarliestOfBothKinds) {
     EXPECT_EQ(lamps.next_change(t0 + 350ms), t0 + 1h);
 }
 
-TEST(LampSet, ClearWindowClearsEveryLinkedKeyOfBothKinds) {
+TEST(LampSet, ClearWindowClearsEveryKeyLinkedToIt) {
     LampSet lamps = styled();
-    // Urgent first: an urgent raise for a window that already has an agent key is absorbed.
-    lamps.raise(LampKind::Urgent, "u1", "w1", t0, false);
-    lamps.raise(LampKind::Urgent, "u2", std::nullopt, t0, false);
     lamps.raise(LampKind::Agent, "a1", "w1", t0, false);
     lamps.raise(LampKind::Agent, "a2", "w1", t0, false);
-    lamps.raise(LampKind::Agent, "a3", "w2", t0, false);
+    lamps.raise(LampKind::Urgent, "u1", "w2", t0, false);
+    lamps.raise(LampKind::Urgent, "u2", std::nullopt, t0, false);
 
+    // No key is linked to w3.
     lamps.clear_window("w3");
     EXPECT_EQ(lamps.active(), kinds({LampKind::Agent, LampKind::Urgent}));
 
-    // Both kinds lose their keys of w1; the others stay lit.
+    // Every agent key of w1 goes; the urgent keys stay.
     lamps.clear_window("w1");
-    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent, LampKind::Urgent}));
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Urgent}));
+    EXPECT_EQ(lamps.layer(t0), lit(kUrgent, {Zone::Left, Zone::Middle, Zone::Right}));
+
+    // The urgent key of w2 goes; a key linked to no window is not touched by any window.
+    lamps.clear_window("w2");
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Urgent}));
     lamps.clear(LampKind::Urgent, "u2");
+    EXPECT_TRUE(lamps.active().empty());
+    EXPECT_TRUE(lamps.empty());
+}
+
+TEST(LampSet, AnAgentRaiseForAWindowThatHasAnUrgentKeyDropsIt) {
+    LampSet lamps = styled();
+    // The terminal's urgent signal comes first, the agent hook some seconds after it.
+    lamps.raise(LampKind::Urgent, "u1", "w1", t0, true);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Urgent}));
+    const TimePoint later = t0 + 6s;
+    lamps.raise(LampKind::Agent, "a1", "w1", later, true);
+
+    // One light on the window: the agent one. The urgent zones show nothing, not even while the
+    // agent lamp is dark in its intro.
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent}));
+    EXPECT_EQ(lamps.layer(later), lit(kAgent, {Zone::Wasd}));
+    EXPECT_TRUE(empty(lamps.layer(later + 150ms)));
+    EXPECT_EQ(lamps.layer(later + 300ms), lit(kAgent, {Zone::Wasd}));
+    EXPECT_EQ(lamps.next_change(later + 300ms), later + 1h);
+
+    // Nothing is left lit once the agent key is cleared.
+    lamps.clear(LampKind::Agent, "a1");
+    EXPECT_TRUE(lamps.empty());
+    EXPECT_TRUE(empty(lamps.layer(later + 1s)));
+    EXPECT_FALSE(lamps.next_change(later + 1s).has_value());
+}
+
+TEST(LampSet, AnAgentRaiseLeavesUrgentKeysOfOtherWindowsAndWindowlessAgentRaisesAlone) {
+    // The kinds lit after an agent key for `agent_window` meets an urgent key linked to
+    // `urgent_window`, each pair in a set of its own.
+    const auto lit_after = [](std::optional<std::string> urgent_window,
+                              std::optional<std::string> agent_window) {
+        LampSet lamps = styled();
+        lamps.raise(LampKind::Urgent, "u", std::move(urgent_window), t0, false);
+        lamps.raise(LampKind::Agent, "a", std::move(agent_window), t0, false);
+        return lamps.active();
+    };
+    const std::vector<LampKind> both = kinds({LampKind::Agent, LampKind::Urgent});
+
+    // The same window: the urgent key goes.
+    EXPECT_EQ(lit_after("w1", "w1"), kinds({LampKind::Agent}));
+    // Another window, or an urgent key with none: it stays.
+    EXPECT_EQ(lit_after("w2", "w1"), both);
+    EXPECT_EQ(lit_after(std::nullopt, "w1"), both);
+    // An agent key with no window drops no urgent key, not even one with no window.
+    EXPECT_EQ(lit_after("w1", std::nullopt), both);
+    EXPECT_EQ(lit_after(std::nullopt, std::nullopt), both);
+
+    // Every urgent key of the window goes, and the ones of other windows stay.
+    LampSet lamps = styled();
+    lamps.raise(LampKind::Urgent, "u1", "w1", t0, false);
+    lamps.raise(LampKind::Urgent, "u2", "w1", t0, false);
+    lamps.raise(LampKind::Urgent, "u3", "w2", t0, false);
+    lamps.raise(LampKind::Agent, "a1", "w1", t0, false);
+    EXPECT_EQ(lamps.active(), both);
+    lamps.clear(LampKind::Urgent, "u3");
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent}));
+}
+
+TEST(LampSet, AnIgnoredAgentRaiseErasesNothing) {
+    LampSet lamps = styled();
+    LampStyle off = agent_style();
+    off.zones.clear();
+    lamps.set_style(LampKind::Agent, off);
+    lamps.raise(LampKind::Urgent, "u1", "w1", t0, false);
+
+    // The agent kind has no zones, so the raise is ignored and the urgent light stays.
+    lamps.raise(LampKind::Agent, "a1", "w1", t0, true);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Urgent}));
+    EXPECT_EQ(lamps.layer(t0), lit(kUrgent, {Zone::Left, Zone::Middle, Zone::Right}));
+}
+
+TEST(LampSet, ReRaisingAnAgentKeyAfterAnAbsorbedUrgentRaiseChangesNothing) {
+    LampSet lamps = styled();
+    lamps.raise(LampKind::Agent, "a1", "w1", t0, false);
+    lamps.raise(LampKind::Urgent, "u1", "w1", t0 + 1s, true);
     EXPECT_EQ(lamps.active(), kinds({LampKind::Agent}));
 
-    lamps.clear_window("w2");
-    EXPECT_TRUE(lamps.active().empty());
+    lamps.raise(LampKind::Agent, "a1", "w1", t0 + 2s, true);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent}));
+    EXPECT_EQ(lamps.layer(t0 + 2s), lit(kAgent, {Zone::Wasd}));
+    EXPECT_EQ(lamps.layer(t0 + 2s + 150ms), lit(kAgent, {Zone::Wasd}));
+    // The re-raise refreshed the TTL and nothing else.
+    EXPECT_EQ(lamps.next_change(t0 + 2s), t0 + 2s + 1h);
+    lamps.clear(LampKind::Agent, "a1");
     EXPECT_TRUE(lamps.empty());
 }
 
