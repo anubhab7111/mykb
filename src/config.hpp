@@ -5,6 +5,7 @@
 #include "core/palette.hpp"
 #include "core/rules.hpp"
 #include "core/zones.hpp"
+#include "reactions_config.hpp"
 
 #include <cstdint>
 #include <expected>
@@ -67,6 +68,8 @@ struct Config {
     HintsCfg hints;
     std::vector<ProfileCfg> profiles;
     std::vector<Rule> rules;
+    /// `default_reactions()` (off) when the config has no `[reactions]` table.
+    ReactionsCfg reactions = default_reactions();
 
     [[nodiscard]] const ProfileCfg *profile(std::string_view name) const;
     /// True if any rule needs the CPU temperature (so the hwmon poller should run).
