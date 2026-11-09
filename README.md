@@ -127,17 +127,22 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
   attention while a lamp is lit cost 0. `max_per_minute` caps all the short reactions.
 - **Silent cases cost 0 writes.** Reactions are off; the keyboard is dark (backlight off after the
   Fn key, brightness 0, lid closed, locked or idle with the gate set to `off`, suspended); or the
-  hourly write budget is spent. The short reactions also stay silent while you are away (locked or
-  idle) and are dropped, not saved. Notifications are skipped during do-not-disturb, for low
-  urgency, and when the notifying app is the focused window. A lamp keeps its state while silent
-  and shows steady, with no blinks, when the keyboard is visible again.
+  hourly write budget is spent. The daemon cannot see the Fn key, so a reaction within 5 s of an Fn
+  press can still write unseen (its backlight reading is up to 5 s old). The short reactions also
+  stay silent while you are away (locked or idle) and are dropped, not saved. Notifications are
+  skipped during do-not-disturb, for low urgency, and when the notifying app is the focused window.
+  A lamp keeps its state while silent and shows steady, with no blinks, when the keyboard is
+  visible again.
 - **On top of a running effect** reactions add no writes: the effect's own ticks carry them, so a
   step may land up to one tick late (about 100 ms).
 - **Claude lamp and focus.** For a session started directly in a terminal, the hook reports that
   terminal's Hyprland window. The lamp then does not light while that terminal is focused, clears
   when you focus it, and the "finished" flash is skipped while it is focused. Background and nested
   sessions have no window link, so their lamp and flash show whatever is focused. The same goes for
-  tmux, zellij and terminals that serve several windows from one process.
+  tmux, zellij and terminals that serve several windows from one process. A subagent's
+  `PostToolUse` and `PostToolUseFailure` events carry the parent session's `session_id`, so a busy
+  subagent can clear a waiting lamp early. That is deliberate: filtering on `agent_id` would leave
+  the lamp stuck after a subagent's own permission prompt is approved.
 - **Layers, bottom to top:** profile or effect, rule overlay, lamps, mode hint (Super, Ctrl,
   submap), short reaction, brightness caps and the backlight gates. A held modifier hides the lamps
   while it is held; a notification during fullscreen video flashes at the dimmed brightness.
@@ -187,9 +192,9 @@ omen-kbd never edits these files itself.
 10. **Claude lamp:** `claude-code-hooks.json` and the hook script. `cmake --install` puts
     `omen-kbd-agent-hook` next to `omen-kbd`, in `~/.local/bin`; it needs `jq`. Merge the `hooks`
     entries of the JSON file into `~/.claude/settings.json`, next to the existing `SessionStart`
-    hook, and leave out its `_comment` line. The three busy events (`UserPromptSubmit`,
-    `PostToolUse`, `PostToolUseFailure`) run with `"async": true`, so the hook cannot slow Claude
-    Code. Every `omen-kbd` and `hyprctl` call inside it is capped at 1 s.
+    hook. The three busy events (`UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`) run with
+    `"async": true`, so the hook cannot slow Claude Code. Every `omen-kbd` and `hyprctl` call
+    inside it is capped at about 1 s (1.5 s worst case).
 
 `omen-kbd doctor` lists what is still missing.
 

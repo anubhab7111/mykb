@@ -552,7 +552,9 @@ TEST_F(AgentHook, ClaudeHooksSnippetIsValidJsonWiredToTheSixEvents) {
         const auto r = run("jq -e '" + filter + "' " + snippet);
         EXPECT_EQ(r.code, 0) << filter << "\n" << r.out;
     };
-    holds(R"(._comment | type == "string")"); // JSON has no comments; this says where it goes
+    // The user merges this file into ~/.claude/settings.json: it must be exactly a hooks block,
+    // with no extra top-level key that Claude Code might reject.
+    holds(R"(keys == ["hooks"])");
     holds(R"(.hooks | keys == ["Notification","PostToolUse","PostToolUseFailure",)"
           R"("SessionEnd","Stop","UserPromptSubmit"])");
     holds(R"([.hooks[][].hooks[] | .type] | all(. == "command"))");
