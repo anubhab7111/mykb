@@ -267,6 +267,27 @@ TEST(Reactions, AgentDoneClearsTheLampAndFlashesUnlessItsWindowIsFocused) {
     EXPECT_FALSE(focused.status().playing.has_value());
 }
 
+TEST(Reactions, AgentEndedClearsTheLampWithoutAFlash) {
+    Reactions r = started();
+    r.on_signal(signal::AgentWaiting{"s1", "w1"}, t0, kShown);
+    r.on_signal(signal::AgentWaiting{"s2", "w2"}, t0, kShown);
+    r.update(t0 + 400ms, kShown);
+    ASSERT_EQ(r.layers(t0 + 400ms).lamps, lit(kWaiting, {Zone::Wasd}));
+
+    // The session is gone, but another one still waits: the lamp stays for it.
+    r.on_signal(signal::AgentEnded{"s1"}, t0 + 400ms, kShown);
+    EXPECT_EQ(r.status().lamps, names({"agent"}));
+    EXPECT_EQ(r.layers(t0 + 400ms).lamps, lit(kWaiting, {Zone::Wasd}));
+
+    // The last one goes: nothing is lit, and unlike `AgentDone` it does not flash.
+    r.on_signal(signal::AgentEnded{"s2"}, t0 + 500ms, kShown);
+    EXPECT_TRUE(r.status().lamps.empty());
+    EXPECT_TRUE(empty(r.layers(t0 + 500ms).lamps));
+    EXPECT_TRUE(empty(r.layers(t0 + 500ms).transient));
+    EXPECT_FALSE(r.status().playing.has_value());
+    EXPECT_FALSE(r.next_change().has_value());
+}
+
 TEST(Reactions, UrgentOnTheFocusedWindowIsIgnoredAndFocusClearsIt) {
     Reactions r = started();
     r.on_signal(signal::FocusChanged{"a", "kitty"}, t0, kShown);
