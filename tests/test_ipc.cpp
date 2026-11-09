@@ -107,6 +107,32 @@ TEST(Ipc, StatusResponseRoundtrips) {
     EXPECT_EQ(err->error, "nope");
 }
 
+TEST(Ipc, StatusFactsRoundTripFullscreenApp) {
+    Status s;
+    s.profile = "default";
+    s.facts.fullscreen_app = "mpv";
+    const std::string wire = encode(Response::success(s));
+    EXPECT_NE(wire.find(R"("fullscreen_app":"mpv")"), std::string::npos) << wire;
+    const auto back = decode_response(wire);
+    ASSERT_TRUE(back.has_value()) << back.error();
+    EXPECT_EQ(back->status.value().facts.fullscreen_app, "mpv");
+
+    s.facts.fullscreen_app = std::nullopt;
+    std::string absent = encode(Response::success(s));
+    const std::string null_key = R"("fullscreen_app":null,)";
+    const auto pos = absent.find(null_key);
+    ASSERT_NE(pos, std::string::npos) << "absent is written as null: " << absent;
+    const auto nulled = decode_response(absent);
+    ASSERT_TRUE(nulled.has_value()) << nulled.error();
+    EXPECT_EQ(nulled->status.value().facts.fullscreen_app, std::nullopt);
+
+    absent.erase(pos, null_key.size()); // JSON from a daemon that predates the fact
+    const auto older = decode_response(absent);
+    ASSERT_TRUE(older.has_value()) << older.error();
+    EXPECT_EQ(older->status.value().facts.fullscreen_app, std::nullopt);
+    EXPECT_EQ(older->status.value().profile, "default");
+}
+
 // Error text can quote raw bytes: nlohmann's parse errors echo the offending byte (a bad request
 // line, a corrupt state file's warning), and CLI arguments arrive in any encoding. Encoding
 // replaces invalid UTF-8 with U+FFFD; throwing would end the daemon (or abort the CLI).

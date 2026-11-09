@@ -253,6 +253,30 @@ TEST(Model, BrightnessCapFromRule) {
     EXPECT_EQ(in(m).brightness, 40);
 }
 
+TEST(Model, FullscreenFactSelectsTheCap) {
+    Model m = model();
+    EXPECT_EQ(in(m).brightness, 100);
+    EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, std::nullopt);
+
+    m.apply_fact(fact::FullscreenApp{"mpv"});
+    EXPECT_EQ(in(m).brightness, 15);
+    EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, "mpv");
+    EXPECT_EQ(m.status(nullptr).active_rules, std::vector<std::string>{"fullscreen video dims"});
+
+    m.apply_fact(fact::FullscreenApp{"kitty"});
+    EXPECT_EQ(in(m).brightness, 100) << "kitty is not a listed video app";
+
+    m.apply_fact(fact::FullscreenApp{"mpv"});
+    m.apply_fact(fact::PowerProfile{"power-saver"});
+    EXPECT_EQ(in(m).brightness, 15) << "the fullscreen rule is listed before power saver dims";
+
+    m.apply_fact(fact::FullscreenApp{std::nullopt});
+    EXPECT_EQ(in(m).brightness, 40) << "back to the power saver cap";
+    EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, std::nullopt);
+    m.apply_fact(fact::PowerProfile{"balanced"});
+    EXPECT_EQ(in(m).brightness, 100);
+}
+
 TEST(Model, UnknownThemeColorWarnsAndUsesWhite) {
     Config cfg = parse_config("[[profiles]]\nname = 'x'\ncolors = ['theme:nope', '#000000', "
                               "'#000000', '#000000']\n")

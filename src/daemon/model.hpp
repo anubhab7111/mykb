@@ -45,10 +45,15 @@ struct LidClosed {
     bool v;
     friend bool operator==(const LidClosed &, const LidClosed &) = default;
 };
+/// The lowercased class of the focused window while it is in true fullscreen; nullopt otherwise.
+struct FullscreenApp {
+    std::optional<std::string> v;
+    friend bool operator==(const FullscreenApp &, const FullscreenApp &) = default;
+};
 } // namespace fact
 
 using FactUpdate = std::variant<fact::PowerProfile, fact::OnBattery, fact::BatteryPct,
-                                fact::CpuTemp, fact::Locked, fact::LidClosed>;
+                                fact::CpuTemp, fact::Locked, fact::LidClosed, fact::FullscreenApp>;
 
 /// What a request changed: nothing, the frame, or the frame and the persisted state.
 enum class Change { None, Output, OutputAndPersist };

@@ -205,6 +205,8 @@ void Model::apply_fact(const FactUpdate &f) {
                 }
             } else if constexpr (std::is_same_v<T, fact::LidClosed>) {
                 lid_closed_ = v.v;
+            } else if constexpr (std::is_same_v<T, fact::FullscreenApp>) {
+                facts_.fullscreen_app = v.v;
             }
         },
         f);

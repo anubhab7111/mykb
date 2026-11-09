@@ -80,6 +80,12 @@ name = "gamemode"
 when = { gamemode = true }
 profile = "game"
 
+# Rules are first-match per category, so this one must come before "power saver dims".
+[[rules]]
+name = "fullscreen video dims"
+when = { fullscreen_app = ["mpv", "vlc", "firefox", "chromium"] }  # ["*"] matches any app
+brightness_cap = 15
+
 [[rules]]
 name = "power saver dims"
 when = { power_profile = "power-saver" }

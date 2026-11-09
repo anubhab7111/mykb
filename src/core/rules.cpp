@@ -1,7 +1,9 @@
 #include "core/rules.hpp"
 
+#include "util/strings.hpp"
 #include "util/toml_read.hpp"
 
+#include <algorithm>
 #include <format>
 
 namespace omenkbd {
@@ -30,17 +32,42 @@ std::expected<void, std::string> take(std::expected<std::optional<T>, std::strin
         }                                                                                          \
     } while (false)
 
+/// `fullscreen_app = ["mpv", ...]`: a non-empty list of strings, lowercased here once.
+std::expected<std::optional<std::vector<std::string>>, std::string>
+parse_fullscreen_app(const toml::table &t, std::string_view where) {
+    const toml::node *n = t.get("fullscreen_app");
+    if (n == nullptr) {
+        return std::optional<std::vector<std::string>>{};
+    }
+    const toml::array *list = n->as_array();
+    if (list == nullptr || list->empty()) {
+        return std::unexpected(
+            std::format("{}: `fullscreen_app` must be a non-empty list of window classes", where));
+    }
+    std::vector<std::string> classes;
+    for (const toml::node &item : *list) {
+        const auto s = item.value<std::string>();
+        if (!s) {
+            return std::unexpected(
+                std::format("{}: `fullscreen_app` must be a list of strings", where));
+        }
+        classes.push_back(to_lower(*s));
+    }
+    return classes;
+}
+
 std::expected<Condition, std::string> parse_condition(const toml::table &t,
                                                       std::string_view where) {
     OMENKBD_TRY(check_keys(t,
                            {"power_profile", "on_battery", "battery_below", "cpu_temp_above",
-                            "gamemode", "locked", "idle"},
+                            "fullscreen_app", "gamemode", "locked", "idle"},
                            where));
     Condition c;
     OMENKBD_TRY(take(opt<std::string>(t, "power_profile", where), c.power_profile));
     OMENKBD_TRY(take(opt<bool>(t, "on_battery", where), c.on_battery));
     OMENKBD_TRY(take(opt<double>(t, "battery_below", where), c.battery_below));
     OMENKBD_TRY(take(opt<double>(t, "cpu_temp_above", where), c.cpu_temp_above));
+    OMENKBD_TRY(take(parse_fullscreen_app(t, where), c.fullscreen_app));
     OMENKBD_TRY(take(opt<bool>(t, "gamemode", where), c.gamemode));
     OMENKBD_TRY(take(opt<bool>(t, "locked", where), c.locked));
     OMENKBD_TRY(take(opt<bool>(t, "idle", where), c.idle));
@@ -117,6 +144,16 @@ bool Condition::holds(const Facts &f) const {
     }
     if (cpu_temp_above && !(f.cpu_temp_c && *f.cpu_temp_c > *cpu_temp_above)) {
         return false;
+    }
+    if (fullscreen_app) {
+        if (!f.fullscreen_app) {
+            return false;
+        }
+        const std::string &app = *f.fullscreen_app;
+        const auto listed = [&app](const std::string &c) { return c == "*" || c == app; };
+        if (!std::ranges::any_of(*fullscreen_app, listed)) {
+            return false;
+        }
     }
     const auto flag = [](const std::optional<bool> &want, bool have) {
         return !want || *want == have;

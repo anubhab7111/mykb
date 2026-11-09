@@ -454,4 +454,9 @@ bool Config::needs_cpu_temp() const {
                                [](const Rule &r) { return r.when.cpu_temp_above.has_value(); });
 }
 
+bool Config::needs_fullscreen() const {
+    return std::ranges::any_of(rules,
+                               [](const Rule &r) { return r.when.fullscreen_app.has_value(); });
+}
+
 } // namespace omenkbd
