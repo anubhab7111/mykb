@@ -22,6 +22,8 @@ struct Facts {
     std::optional<bool> on_battery;
     std::optional<double> battery_pct;
     std::optional<double> cpu_temp_c;
+    /// Lowercased class of the focused window while it is in true fullscreen; nullopt otherwise.
+    std::optional<std::string> fullscreen_app;
     bool gamemode = false;
     bool locked = false;
     bool idle = false;
@@ -35,6 +37,9 @@ struct Condition {
     std::optional<bool> on_battery;
     std::optional<double> battery_below;
     std::optional<double> cpu_temp_above;
+    /// Lowercased window classes; holds when `Facts::fullscreen_app` is set and listed. "*" matches
+    /// any fullscreen app.
+    std::optional<std::vector<std::string>> fullscreen_app;
     std::optional<bool> gamemode;
     std::optional<bool> locked;
     std::optional<bool> idle;

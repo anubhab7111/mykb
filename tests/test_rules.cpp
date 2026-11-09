@@ -126,3 +126,68 @@ TEST(Rules, UnknownConditionFieldIsRejected) {
     ASSERT_FALSE(r.has_value());
     EXPECT_NE(r.error().find("foo"), std::string::npos) << r.error();
 }
+
+TEST(Rules, FullscreenAppConditionMatchesCaseInsensitivelyAndStarMatchesAny) {
+    const auto r =
+        rules("[[rules]]\nname = 'video'\nwhen = { fullscreen_app = ['MPV', 'Firefox'] }\n"
+              "brightness_cap = 15\n"
+              "[[rules]]\nname = 'any'\nwhen = { fullscreen_app = ['*'] }\n"
+              "profile = 'game'\n");
+    ASSERT_EQ(r.size(), 2u);
+    ASSERT_TRUE(r[0].when.fullscreen_app.has_value());
+    EXPECT_EQ(*r[0].when.fullscreen_app, (std::vector<std::string>{"mpv", "firefox"}))
+        << "the parser lowercases the listed classes";
+
+    Facts f;
+    f.fullscreen_app = "mpv"; // the fact is already lowercase at its source
+    auto out = evaluate(r, f);
+    EXPECT_EQ(out.brightness_cap, 15);
+    EXPECT_EQ(out.profile, "game");
+    EXPECT_EQ(out.active, (std::vector<std::string>{"video", "any"}));
+
+    f.fullscreen_app = "firefox";
+    EXPECT_EQ(evaluate(r, f).brightness_cap, 15);
+
+    f.fullscreen_app = "kitty";
+    out = evaluate(r, f);
+    EXPECT_EQ(out.brightness_cap, std::nullopt) << "kitty is not listed";
+    EXPECT_EQ(out.profile, "game") << "but \"*\" matches any fullscreen app";
+}
+
+TEST(Rules, FullscreenAppConditionDoesNotHoldWithoutAFullscreenWindow) {
+    const auto r = rules("[[rules]]\nname = 'video'\nwhen = { fullscreen_app = ['mpv'] }\n"
+                         "brightness_cap = 15\n"
+                         "[[rules]]\nname = 'any'\nwhen = { fullscreen_app = ['*'] }\n"
+                         "profile = 'game'\n");
+    const auto out = evaluate(r, Facts{});
+    EXPECT_EQ(out.brightness_cap, std::nullopt);
+    EXPECT_EQ(out.profile, std::nullopt) << "even \"*\" needs a fullscreen window";
+    EXPECT_TRUE(out.active.empty());
+
+    Facts f;
+    f.fullscreen_app = "vlc";
+    EXPECT_EQ(evaluate(r, f).brightness_cap, std::nullopt) << "a fullscreen app that is not listed";
+
+    f.fullscreen_app = "mpv";
+    f.locked = true;
+    const auto both = rules("[[rules]]\nname = 'x'\nwhen = { fullscreen_app = ['mpv'], locked = "
+                            "false }\nbrightness_cap = 15\n");
+    EXPECT_EQ(evaluate(both, f).brightness_cap, std::nullopt) << "the other conditions still apply";
+    f.locked = false;
+    EXPECT_EQ(evaluate(both, f).brightness_cap, 15);
+}
+
+TEST(Rules, FullscreenAppMustBeANonEmptyArrayOfStrings) {
+    const char *const bad[] = {
+        "fullscreen_app = 'mpv'", "fullscreen_app = true",       "fullscreen_app = []",
+        "fullscreen_app = [1]",   "fullscreen_app = ['mpv', 2]", "fullscreen_app = [['mpv']]",
+    };
+    for (const char *when : bad) {
+        const std::string src =
+            std::string("[[rules]]\nname = 'x'\nwhen = { ") + when + " }\nbrightness_cap = 15\n";
+        const auto r = try_rules(src);
+        ASSERT_FALSE(r.has_value()) << src;
+        EXPECT_NE(r.error().find("fullscreen_app"), std::string::npos)
+            << src << " -> " << r.error();
+    }
+}

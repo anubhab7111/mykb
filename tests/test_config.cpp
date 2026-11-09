@@ -12,7 +12,7 @@ TEST(Config, ExampleConfigParses) {
     EXPECT_TRUE(c.hints.modifiers.contains("super+shift"));
     EXPECT_EQ(c.hints.timeout_s, 15u);
     EXPECT_EQ(c.gates.on_idle, GateAction::Dim);
-    EXPECT_EQ(c.rules.size(), 3u);
+    EXPECT_EQ(c.rules.size(), 4u);
 }
 
 TEST(Config, EmbeddedDefaultEnablesReactions) {
@@ -81,6 +81,42 @@ TEST(Config, NeedsCpuTempOnlyWithATemperatureRule) {
     ASSERT_NE(c->profile("a"), nullptr);
     EXPECT_EQ(c->profile("a")->speed, 50);
     EXPECT_EQ(c->profile("b"), nullptr);
+}
+
+TEST(Config, NeedsFullscreenOnlyWhenARuleUsesIt) {
+    const auto without =
+        parse_config("[[profiles]]\nname='a'\ncolors=['#000000']\n[[rules]]\n"
+                     "name='hot'\nwhen={ cpu_temp_above = 90 }\nbrightness_cap = 10");
+    ASSERT_TRUE(without.has_value()) << without.error();
+    EXPECT_FALSE(without->needs_fullscreen());
+    const auto none = parse_config("[[profiles]]\nname='a'\ncolors=['#000000']");
+    ASSERT_TRUE(none.has_value()) << none.error();
+    EXPECT_FALSE(none->needs_fullscreen());
+    const auto with = parse_config("[[profiles]]\nname='a'\ncolors=['#000000']\n[[rules]]\n"
+                                   "name='hot'\nwhen={ cpu_temp_above = 90 }\nbrightness_cap = 10\n"
+                                   "[[rules]]\nname='fs'\nwhen={ fullscreen_app = ['*'] }\n"
+                                   "brightness_cap = 15");
+    ASSERT_TRUE(with.has_value()) << with.error();
+    EXPECT_TRUE(with->needs_fullscreen());
+    EXPECT_TRUE(embedded_default().needs_fullscreen()) << "the shipped config has such a rule";
+}
+
+TEST(Config, EmbeddedDefaultDimsFullscreenVideoBeforePowerSaver) {
+    const Config c = embedded_default();
+    const auto index = [&c](std::string_view name) {
+        return std::ranges::find(c.rules, name, &Rule::name) - c.rules.begin();
+    };
+    const auto count = static_cast<std::ptrdiff_t>(c.rules.size());
+    const auto video = index("fullscreen video dims");
+    ASSERT_LT(video, count) << "the rule is missing";
+    const Rule &rule = c.rules[static_cast<std::size_t>(video)];
+    EXPECT_EQ(rule.brightness_cap, 15);
+    ASSERT_TRUE(rule.when.fullscreen_app.has_value());
+    EXPECT_EQ(*rule.when.fullscreen_app,
+              (std::vector<std::string>{"mpv", "vlc", "firefox", "chromium"}));
+    EXPECT_GT(video, index("gamemode"));
+    ASSERT_LT(index("power saver dims"), count);
+    EXPECT_LT(video, index("power saver dims")) << "rules are first-match per category";
 }
 
 TEST(Config, ZoneMapFromToml) {

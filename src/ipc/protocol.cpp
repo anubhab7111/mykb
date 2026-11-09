@@ -43,6 +43,7 @@ ojson facts_json(const Facts &f) {
                  {"on_battery", opt_json(f.on_battery)},
                  {"battery_pct", opt_json(f.battery_pct)},
                  {"cpu_temp_c", opt_json(f.cpu_temp_c)},
+                 {"fullscreen_app", opt_json(f.fullscreen_app)},
                  {"gamemode", f.gamemode},
                  {"locked", f.locked},
                  {"idle", f.idle}};
@@ -54,6 +55,7 @@ Facts facts_from(const ojson &j) {
     f.on_battery = opt_get<bool>(j, "on_battery");
     f.battery_pct = opt_get<double>(j, "battery_pct");
     f.cpu_temp_c = opt_get<double>(j, "cpu_temp_c");
+    f.fullscreen_app = opt_get<std::string>(j, "fullscreen_app");
     f.gamemode = j.value("gamemode", false);
     f.locked = j.value("locked", false);
     f.idle = j.value("idle", false);

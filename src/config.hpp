@@ -74,6 +74,8 @@ struct Config {
     [[nodiscard]] const ProfileCfg *profile(std::string_view name) const;
     /// True if any rule needs the CPU temperature (so the hwmon poller should run).
     [[nodiscard]] bool needs_cpu_temp() const;
+    /// True if any rule has a `fullscreen_app` condition (so the fullscreen query should run).
+    [[nodiscard]] bool needs_fullscreen() const;
 };
 
 /// Parses and validates a config. Error messages name the offending field.
