@@ -227,13 +227,69 @@ TEST(Reactions, WaitingAgentWhoseWindowIsFocusedDoesNotLight) {
     EXPECT_EQ(r.layers(t0).lamps, lit(kWaiting, {Zone::Wasd}));
     EXPECT_EQ(r.status().lamps, names({"agent"}));
 
-    // Before the first focus event nothing counts as focused (R10), not even an empty address.
+    // Before the first focus event nothing counts as focused (R10).
     Reactions fresh = started();
     fresh.on_signal(signal::AgentWaiting{"s3", "w1"}, t0, kShown);
     EXPECT_EQ(fresh.status().lamps, names({"agent"}));
+
+    // An empty address is no window: the lamp lights, linked to nothing, so the empty focus
+    // Hyprland reports on an empty workspace does not clear it.
     Reactions blank = started();
     blank.on_signal(signal::AgentWaiting{"s4", ""}, t0, kShown);
     EXPECT_EQ(blank.status().lamps, names({"agent"}));
+    blank.on_signal(signal::FocusChanged{"", ""}, t0 + 1s, kShown);
+    EXPECT_EQ(blank.status().lamps, names({"agent"}));
+}
+
+TEST(Reactions, AnEmptyWindowIsNoWindow) {
+    // Hyprland reports an empty address when nothing has focus (an empty workspace). That focus
+    // clears no light, and no key is linked to "".
+    Reactions r = started();
+    r.on_signal(signal::FocusChanged{"w0", "kitty"}, t0, kShown);
+    r.on_signal(signal::AgentWaiting{"s1", ""}, t0, kShown);
+    r.on_signal(signal::UrgentRaised{"w2"}, t0, kShown);
+    r.update(t0 + 1s, kShown);
+    ASSERT_EQ(r.status().lamps, names({"agent", "urgent"}));
+
+    r.on_signal(signal::FocusChanged{"", ""}, t0 + 1s, kShown);
+    EXPECT_EQ(r.status().lamps, names({"agent", "urgent"}));
+    EXPECT_EQ(r.layers(t0 + 1s).lamps,
+              (LayerOps{std::nullopt, std::nullopt, Paint{kUrgent}, Paint{kWaiting}}));
+
+    // An urgent window with no address has nothing to focus or close, and the attention light has
+    // no TTL, so it would stay lit until Hyprland went away: it is dropped.
+    Reactions u = started();
+    u.on_signal(signal::UrgentRaised{""}, t0, kShown);
+    EXPECT_TRUE(u.status().lamps.empty());
+    EXPECT_TRUE(empty(u.layers(t0).lamps));
+    EXPECT_FALSE(u.next_change().has_value());
+
+    // An agent raise with no address drops no urgent light (none can be linked to "").
+    Reactions a = started();
+    a.on_signal(signal::UrgentRaised{"w3"}, t0, kShown);
+    a.on_signal(signal::AgentWaiting{"s2", ""}, t0, kShown);
+    EXPECT_EQ(a.status().lamps, names({"agent", "urgent"}));
+
+    // A finished session with no address is never the focused one: it flashes.
+    Reactions d = started();
+    d.on_signal(signal::FocusChanged{"", ""}, t0, kShown);
+    d.on_signal(signal::AgentDone{"s3", ""}, t0, kShown);
+    EXPECT_EQ(d.status().playing, "agent-done");
+}
+
+TEST(Reactions, ReconfigureToDisabledForgetsTheFocus) {
+    Reactions r = started();
+    r.on_signal(signal::FocusChanged{"w1", "com.rtosta.zapzap"}, t0, kShown);
+    ReactionsCfg off = make_cfg();
+    off.enabled = false;
+    r.reconfigure(off, resolver());
+    r.reconfigure(make_cfg(), resolver());
+
+    // The focus from before the gap is stale: it must not suppress the lamp or the flash.
+    r.on_signal(signal::AgentWaiting{"s1", "w1"}, t0 + 1s, kShown);
+    EXPECT_EQ(r.status().lamps, names({"agent"}));
+    r.on_signal(zapzap(), t0 + 1s, kShown);
+    EXPECT_EQ(r.status().playing, "notify");
 }
 
 TEST(Reactions, AgentDoneClearsTheLampAndFlashesUnlessItsWindowIsFocused) {
