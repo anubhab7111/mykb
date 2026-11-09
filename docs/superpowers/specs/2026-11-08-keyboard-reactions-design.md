@@ -142,10 +142,11 @@ The order has three consequences:
 - **Hyprland request socket** (`.socket.sock`, same directory as socket2): `j/activewindow` returns
   the JSON that `hyprctl activewindow -j` prints, with `class` and `fullscreen` (a mode number).
   - What is known so far: with nothing fullscreen the value is `0`.
-  - What still needs checking: which values mean true fullscreen and which mean Super+F's
-    maximize. The 2026-11-10 poll saw only `0` (the key presses missed its 40 s window), so this is
-    still open. Until it is confirmed the predicate is `(fullscreen & 2) != 0` (Hyprland's mode
-    bits: 1 maximized, 2 fullscreen), isolated in one function.
+  - **Confirmed on this machine (2026-11-10 poll):** true fullscreen reads `2` (Super+Shift+F in
+    Alacritty, and Firefox's own fullscreen), Super+F's maximize reads `1`, and nothing special
+    reads `0`; `fullscreenClient` equalled `fullscreen` in every sample. The predicate is
+    `(fullscreen & 2) != 0` (Hyprland's mode bits: 1 maximized, 2 fullscreen), isolated in one
+    function, so Super+F never dims.
 - **The user's Hyprland config:**
   - Super+F is `fullscreen({ mode = "maximized" })`, which must not dim.
   - Super+Shift+F is `fullscreen({ mode = "fullscreen" })`.
