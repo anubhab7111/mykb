@@ -25,9 +25,12 @@ Output compose(const Inputs &i, double t) {
         }
     }
 
+    zones = omenkbd::apply(zones, i.lamps);
     if (i.hint) {
         zones.fill(*i.hint);
     }
+    zones = omenkbd::apply(zones, i.transient);
+
     for (Rgb &z : zones) {
         z = z.scale(i.brightness);
     }

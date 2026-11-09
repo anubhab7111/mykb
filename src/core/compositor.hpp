@@ -1,7 +1,8 @@
 #pragma once
-// Layer compositor: base effect → rule overlay → mode hint → brightness → backlight gate.
-// Pure: the output is a function of the inputs and the time since start.
+// Layer compositor: base effect → rule overlay → lamps → mode hint → transient → brightness →
+// backlight gate. Pure: the output is a function of the inputs and the time since start.
 
+#include "core/clip.hpp"
 #include "core/effects.hpp"
 #include "core/zones.hpp"
 
@@ -40,6 +41,10 @@ struct Inputs {
     std::uint8_t brightness;
     /// Backlight should be on (user on, not gated off).
     bool backlight;
+    /// Steady and blinking lights, drawn over the overlay and under the hint.
+    LayerOps lamps{};
+    /// The clip playing now, drawn over the hint and under the brightness scale.
+    LayerOps transient{};
     friend bool operator==(const Inputs &, const Inputs &) = default;
 };
 
