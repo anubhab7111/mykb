@@ -73,6 +73,12 @@ class Reactions {
     /// when nothing will change.
     [[nodiscard]] std::optional<TimePoint> next_change() const;
 
+    /// True when `visibility` is not the one the last `on_signal` or `update` took, so the layers
+    /// may be stale (a lamp hidden or shown): the caller then treats `update` as overdue, and
+    /// `Model::reaction_deadline` returns a time long past (`TimePoint{}`). Before any call nothing
+    /// is held, and only a visible keyboard counts as a change.
+    [[nodiscard]] bool visibility_differs(Visibility visibility) const;
+
     [[nodiscard]] ReactionsStatus status() const;
 
   private:
@@ -101,6 +107,8 @@ class Reactions {
     std::string focused_window_;
     std::string focused_class_;
     Visibility visibility_{false, false};
+    /// `visibility_` was taken by an `on_signal` or `update`.
+    bool visibility_taken_ = false;
     std::optional<TimePoint> next_change_;
 };
 

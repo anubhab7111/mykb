@@ -79,7 +79,13 @@ class Model {
     /// Hands `s` to the reactions at `now`. A no-op while `[reactions]` is off.
     void apply_signal(const Signal &s, TimePoint now);
     /// When the reaction layers next change on their own, so the daemon wakes to show it; `nullopt`
-    /// when nothing will, and while suspended. A time that is not after now means a frame is due.
+    /// when nothing will, while suspended, and while `[reactions]` is off. A time that is not after
+    /// now means a frame is due.
+    ///
+    /// `TimePoint{}`, long past, when the visibility changed since the reactions last took it and
+    /// no frame followed: the daemon forgets its backlight reading only after composing a forced
+    /// write, and `record_write` clears a spent budget without a frame. The next `inputs` takes
+    /// the new visibility (a held lamp shows or hides at once), and the deadline moves on.
     [[nodiscard]] std::optional<TimePoint> reaction_deadline() const;
     /// What the firmware reports (e.g. after the Fn backlight key), read at `now`.
     void set_hw_backlight(bool on, TimePoint now) {

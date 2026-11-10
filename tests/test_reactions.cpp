@@ -575,6 +575,24 @@ TEST(Reactions, SuppressDropsClipsButKeepsLamps) {
     EXPECT_EQ(r.layers(t0 + 3s).transient, lit(kSweep, {Zone::Left, Zone::Wasd}));
 }
 
+TEST(Reactions, VisibilityDiffersFromTheLastOneTaken) {
+    // Before any call nothing is held, and only a visible keyboard could need a frame.
+    Reactions fresh = started();
+    EXPECT_TRUE(fresh.visibility_differs(kShown));
+    EXPECT_TRUE(fresh.visibility_differs(kAway));
+    EXPECT_FALSE(fresh.visibility_differs(kDark));
+    EXPECT_FALSE(fresh.visibility_differs(Visibility{false, false}));
+
+    Reactions r = started();
+    r.on_signal(signal::UrgentRaised{"a"}, t0, kShown);
+    EXPECT_FALSE(r.visibility_differs(kShown));
+    EXPECT_TRUE(r.visibility_differs(kDark));
+    EXPECT_TRUE(r.visibility_differs(kAway));
+    r.update(t0 + 1s, kDark);
+    EXPECT_FALSE(r.visibility_differs(kDark));
+    EXPECT_TRUE(r.visibility_differs(kShown));
+}
+
 TEST(Reactions, NextChangeCoversIntroClipAndTtl) {
     Reactions r = started();
     r.on_signal(signal::AgentWaiting{"s1", "w1"}, t0, kShown); // intro changes at 150, 300 ms
