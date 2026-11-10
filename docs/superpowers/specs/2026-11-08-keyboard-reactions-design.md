@@ -291,10 +291,13 @@ model the way submaps do today.
   - An agent key is not recorded if its window is already focused when it is raised.
   - An urgent raise for a window that already has an agent key is absorbed: no second light for one
     event. The reverse holds too: raising an agent key for a window drops any urgent key linked to
-    that window. The `permission_prompt` hook fires about 6 s after the prompt, so the terminal's
-    urgent signal usually arrives first, and the agent lamp then replaces it (a window never holds
-    keys of both kinds). The attention light has already blinked by then; the replacement costs no
-    extra write, because it rides on the agent lamp's first frame.
+    that window. If the terminal also asks for attention (it rings its bell), its urgent signal
+    arrives first, and the agent lamp then replaces it (a window never holds keys of both kinds).
+    The attention light has already blinked by then; the replacement costs no extra write, because
+    it rides on the agent lamp's first frame. Live check (2026-11-11, Alacritty on Hyprland 0.57):
+    a real `permission_prompt` did not make the terminal urgent, so a waiting episode cost 3 + 1 as
+    designed. A bell does raise `urgent` (verified with a helper terminal), so a terminal or Claude
+    Code setting that rings it would show this replacement.
 - API (pure):
   - `raise(kind, key, now, std::optional<std::string> window)`, `clear(kind, key)`,
     `clear_window(window)`, `clear_kind(kind)`, `expire(now)`
