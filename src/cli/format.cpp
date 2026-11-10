@@ -71,6 +71,16 @@ std::string format_status(const Status &s) {
          std::format("{}%  {}  backlight {}", s.brightness, on_off(s.on), on_off(s.backlight)));
     line("hint", s.hint.value_or("-"));
     line("rules", s.active_rules.empty() ? "-" : join(s.active_rules, ", "));
+    std::string reactions = on_off(s.reactions.enabled);
+    if (s.reactions.enabled) {
+        if (!s.reactions.lamps.empty()) {
+            reactions += "  lamps " + join(s.reactions.lamps, ",");
+        }
+        if (s.reactions.playing) {
+            reactions += "  playing " + *s.reactions.playing;
+        }
+    }
+    line("reactions", reactions);
     line("backend", std::format("{}  writes {}", s.backend, s.lifetime_writes));
     if (s.last_error) {
         line("error", *s.last_error);

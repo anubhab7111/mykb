@@ -4,6 +4,7 @@
 
 #include "core/reactions_status.hpp"
 #include "core/rules.hpp"
+#include "core/signals.hpp"
 
 #include <array>
 #include <cstdint>
@@ -61,11 +62,29 @@ struct Reload {
 struct Subscribe {
     friend bool operator==(const Subscribe &, const Subscribe &) = default;
 };
+/// A desktop notification arrived (from the swaync script). `urgency` is as the sender spelled it:
+/// `to_signal` accepts any case.
+struct Notify {
+    std::string app;
+    std::string desktop_entry;
+    std::string urgency;
+    friend bool operator==(const Notify &, const Notify &) = default;
+};
+/// A Claude Code session changed state (from the hook): `state` is `waiting`, `working`, `done` or
+/// `end`. `window` is the Hyprland address of the session's terminal as the sender spelled it
+/// (`hyprctl` prints a `0x` prefix); `to_signal` normalizes it. `source` names the sender.
+struct Agent {
+    std::string state;
+    std::string session;
+    std::optional<std::string> window;
+    std::string source;
+    friend bool operator==(const Agent &, const Agent &) = default;
+};
 } // namespace req
 
-using Request =
-    std::variant<req::Status, req::Set, req::Profile, req::Brightness, req::Power, req::Effect,
-                 req::Hint, req::Idle, req::Flag, req::Reload, req::Subscribe>;
+using Request = std::variant<req::Status, req::Set, req::Profile, req::Brightness, req::Power,
+                             req::Effect, req::Hint, req::Idle, req::Flag, req::Reload,
+                             req::Subscribe, req::Notify, req::Agent>;
 
 /// What `status`, Waybar and `doctor` see. `zones` are logical-order `RRGGBB` after compositing.
 struct Status {
@@ -106,6 +125,13 @@ struct Response {
 /// One JSON line, without the trailing newline.
 std::string encode(const Request &r);
 std::expected<Request, std::string> decode_request(std::string_view line);
+
+/// The signal a `notify` or `agent` request reports, nullopt for every other request, and an error
+/// for an unknown urgency or state. The urgency is case-insensitive. The window is normalized (R8:
+/// lowercase hex, no `0x`), and an empty one (`""` or `0x`) becomes nullopt so that no key is ever
+/// linked to an empty address. `working` and `end` carry no window.
+std::optional<std::expected<Signal, std::string>> to_signal(const Request &r);
+
 std::string encode(const Response &r);
 /// The status object alone (as in a response's `status`), e.g. for `status --json`; `indent` as
 /// in nlohmann::json::dump (-1 = one line).
