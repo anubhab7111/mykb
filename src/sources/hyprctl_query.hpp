@@ -42,9 +42,10 @@ std::optional<ActiveWindowInfo> parse_active_window(std::string_view json);
 /// - At most one query is in flight. It is cut off 300 ms after it connects, and a reply over
 ///   64 KiB is refused.
 /// - The result is the window; a default `ActiveWindowInfo` when Hyprland says nothing is focused
-///   (`{}` or an empty reply); nullopt when the query failed (no socket, error, timeout, too big,
-///   not an answer). Delivered once per started query, on the loop thread, after the query has let
-///   go of its socket and timers, so the callback may call `request` again.
+///   (it answers `{}`); nullopt when the query failed (no socket, error, timeout, too big, not an
+///   answer, an empty reply: Hyprland never sends one, so it is a hiccup, not "nothing focused").
+///   Delivered once per started query, on the loop thread, after the query has let go of its
+///   socket and timers, so the callback may call `request` again.
 /// - The destructor and `cancel` close the socket and drop the query without a callback.
 ///
 /// Loop thread only.

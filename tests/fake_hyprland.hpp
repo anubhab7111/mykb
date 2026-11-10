@@ -3,7 +3,6 @@
 // fake request socket (`.socket.sock`, the one `hyprctl` talks to) that replies, stays silent or
 // floods, and counts what the code under test did to it.
 
-#include "daemon/clock.hpp"
 #include "helpers.hpp"
 
 #include "daemon/event_loop.hpp"
@@ -109,11 +108,6 @@ class FakeRequestServer {
                       std::chrono::milliseconds timeout = std::chrono::milliseconds{2000}) const {
         return wait_until([&] { return requests().size() >= n; }, timeout);
     }
-    /// When the first connection was accepted; the client connected no later than that.
-    [[nodiscard]] std::optional<TimePoint> first_accept() const {
-        const std::lock_guard lock(mu_);
-        return first_accept_;
-    }
 
   private:
     struct Conn {
@@ -152,9 +146,6 @@ class FakeRequestServer {
         {
             const std::lock_guard lock(mu_);
             ++connections_;
-            if (!first_accept_) {
-                first_accept_ = Clock::now();
-            }
         }
         conns.push_back(Conn{std::move(fd), false});
     }
@@ -241,7 +232,6 @@ class FakeRequestServer {
     int connections_ = 0;
     int closed_by_client_ = 0;
     std::vector<std::string> requests_;
-    std::optional<TimePoint> first_accept_;
     std::thread thread_; // last: it runs `run`, which uses everything above
 };
 

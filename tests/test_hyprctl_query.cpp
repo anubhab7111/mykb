@@ -83,6 +83,12 @@ struct Rig {
     }
 };
 
+constexpr std::size_t kCap = std::size_t{64} * 1024;
+
+/// A reply of exactly the cap that is all nesting: valid JSON, and not a window. It must not
+/// overflow the stack, in the parser or when the document is destroyed.
+std::string deeply_nested() { return std::string(kCap / 2, '[') + std::string(kCap / 2, ']'); }
+
 std::size_t open_fds() {
     std::size_t n = 0;
     for ([[maybe_unused]] const auto &entry : fs::directory_iterator("/proc/self/fd")) {
@@ -139,6 +145,7 @@ TEST(HyprctlQuery, GarbageNeverThrowsAndNeverMakesAWindow) {
         R"({"address":"0xab","class":"mpv","fullscreen":18446744073709551615})",
         R"({"address":"0xab","class":"mpv","fullscreen":1e400})",
         std::string(1000, '['),
+        deeply_nested(),
     };
     for (const std::string &text : garbage) {
         EXPECT_EQ(parse_active_window(text), std::nullopt) << text.substr(0, 80);
@@ -179,15 +186,16 @@ TEST(HyprctlQuery, AccumulatesAReplyThatArrivesInPieces) {
         << "it reads to EOF, not to the first chunk";
 }
 
-// Nothing focused is a real answer (the bridge clears the fullscreen fact on it); a failure is
-// nullopt (the bridge keeps the fact).
-TEST(HyprctlQuery, NothingFocusedIsAnAnswerAndAnythingElseIsNot) {
+// Ruling P23: Hyprland answers `{}` when nothing is focused, which is a real answer (the bridge
+// clears the fullscreen fact on it). An empty reply can only be a hiccup, so it is a failure,
+// like any other reply that is not a window: nullopt (the bridge keeps the fact).
+TEST(HyprctlQuery, AnEmptyObjectIsAnAnswerAndAnythingElseIsNot) {
     Rig rig;
     const std::vector<std::pair<std::string, Info>> cases{
         {"{}", ActiveWindowInfo{}},
-        {"", ActiveWindowInfo{}},
-        {" \n", ActiveWindowInfo{}},
         {"{ }\n", ActiveWindowInfo{}},
+        {"", std::nullopt},
+        {" \n", std::nullopt},
         {"Invalid", std::nullopt},
         {"[]", std::nullopt},
         {R"({"x":1})", std::nullopt}, // an object, but not a window
@@ -211,9 +219,7 @@ TEST(HyprctlQuery, TimesOutAndReportsNullopt) {
     const std::vector<Delivery> got = rig.deliveries();
     EXPECT_EQ(got.at(0).info, std::nullopt);
     EXPECT_LT(got[0].at - t0, 1s);
-    const std::optional<TimePoint> accepted = rig.server.first_accept();
-    ASSERT_TRUE(accepted.has_value());
-    EXPECT_GE(got[0].at - *accepted, 250ms) << "300 ms from the connect, not from the request";
+    EXPECT_GE(got[0].at - t0, 350ms) << "100 ms of debounce, then 300 ms from the connect";
     EXPECT_TRUE(wait_until([&] { return rig.server.closed_by_client() == 1; }, 1000ms))
         << "the timed-out connection is closed";
     std::this_thread::sleep_for(150ms);
@@ -237,10 +243,10 @@ TEST(HyprctlQuery, EachRequestRestartsTheDebounce) {
     Rig rig;
     rig.server.reply_with(std::string(kMpv));
     TimePoint last = Clock::now();
-    for (int i = 0; i < 4; ++i) { // 0, 40, 80, 120 ms: the first one alone would fire at 100 ms
+    for (int i = 0; i < 4; ++i) { // 0, 20, 40, 60 ms: the first one alone would fire at 100 ms
         rig.request();
         last = Clock::now();
-        std::this_thread::sleep_for(40ms);
+        std::this_thread::sleep_for(20ms);
     }
     ASSERT_TRUE(rig.wait_for(1));
     EXPECT_GE(rig.deliveries().at(0).at - last, 90ms) << "100 ms after the last request";
@@ -251,14 +257,22 @@ TEST(HyprctlQuery, EachRequestRestartsTheDebounce) {
 
 TEST(HyprctlQuery, CapsTheReplySize) {
     Rig rig;
-    rig.server.reply_with(std::string(std::size_t{1} << 20, 'x')); // 1 MiB
+    // A valid window padded to 1 MiB: only the cap can refuse it.
+    rig.server.reply_with(std::string(kMpv) + std::string(std::size_t{1} << 20, ' '));
+    rig.request();
+    ASSERT_TRUE(rig.wait_for(1));
+    EXPECT_EQ(rig.deliveries().at(0).info, std::nullopt);
+}
+
+TEST(HyprctlQuery, ADeeplyNestedReplyIsNotAnAnswerAndDoesNotCrash) {
+    Rig rig;
+    rig.server.reply_with(deeply_nested());
     rig.request();
     ASSERT_TRUE(rig.wait_for(1));
     EXPECT_EQ(rig.deliveries().at(0).info, std::nullopt);
 }
 
 TEST(HyprctlQuery, TheCapIs64KiBExactly) {
-    constexpr std::size_t kCap = std::size_t{64} * 1024;
     const std::string window(kMpv);
     Rig rig;
     rig.server.reply_with(window + std::string(kCap - window.size(), ' '));
