@@ -31,6 +31,11 @@ class HyprlandTracker {
     /// The outputs for `ev`, in the order they should be delivered.
     std::vector<TrackerOut> on(const HyprEvent &ev);
 
+    /// The signals that re-establish what is known now: the focus (if one is held), then each
+    /// urgent window, in address order. Changes nothing. For whoever was not listening while the
+    /// events came in (P25).
+    [[nodiscard]] std::vector<Signal> replay() const;
+
   private:
     using Out = std::vector<TrackerOut>;
 

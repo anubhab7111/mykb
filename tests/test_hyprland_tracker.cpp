@@ -317,6 +317,55 @@ TEST(HyprlandTracker, RepeatedActiveWindowForTheSameWindowIsIgnored) {
         << "and after Disconnected";
 }
 
+// `replay` says what the tracker knows right now as the signals that would re-establish it: the
+// focus first, then each urgent window in address order. It is a read: nothing changes.
+TEST(HyprlandTracker, ReplayReportsTheHeldFocusAndUrgentWindows) {
+    using Signals = std::vector<Signal>;
+    HyprlandTracker t;
+    EXPECT_EQ(t.replay(), Signals{}) << "nothing is known before any event";
+
+    focus(t, "kitty", "a1");
+    EXPECT_EQ(t.replay(), (Signals{signal::FocusChanged{"a1", "kitty"}}));
+
+    // Raised out of order, so the set's own iteration order cannot pass for a sorted one.
+    (void)t.on(hypr::Urgent{"u2"});
+    (void)t.on(hypr::Urgent{"u1"});
+    (void)t.on(hypr::Urgent{"u3"});
+    EXPECT_EQ(t.replay(), (Signals{signal::FocusChanged{"a1", "kitty"}, signal::UrgentRaised{"u1"},
+                                   signal::UrgentRaised{"u2"}, signal::UrgentRaised{"u3"}}))
+        << "the focus first, then the urgent windows in sorted order";
+
+    // Pure: asking twice gives the same answer, and the state behind it is untouched.
+    EXPECT_EQ(t.replay(), t.replay());
+    EXPECT_EQ(t.on(hypr::ActiveWindow{"kitty"}), Out{});
+    EXPECT_EQ(t.on(hypr::ActiveWindowV2{"a1"}), Out{})
+        << "the focus is still held, so a repeat is ignored";
+    EXPECT_EQ(t.on(hypr::CloseWindow{"u2"}),
+              (Out{sig(signal::WindowClosed{}), sig(signal::UrgentCleared{"u2"}), check()}))
+        << "u2 is still in the urgent set";
+    (void)t.on(hypr::Urgent{"u2"}); // put it back
+
+    // Focusing an urgent window ends its urgency, so it is not replayed any more.
+    focus(t, "mpv", "u1");
+    EXPECT_EQ(t.replay(), (Signals{signal::FocusChanged{"u1", "mpv"}, signal::UrgentRaised{"u2"},
+                                   signal::UrgentRaised{"u3"}}));
+
+    // Nothing focused is a focus like any other: it replays as the empty address.
+    focus(t, "", "");
+    EXPECT_EQ(t.replay(), (Signals{signal::FocusChanged{"", ""}, signal::UrgentRaised{"u2"},
+                                   signal::UrgentRaised{"u3"}}));
+
+    // A (re)connect and a disconnect forget everything, so there is nothing to replay.
+    (void)t.on(hypr::Connected{});
+    EXPECT_EQ(t.replay(), Signals{});
+    focus(t, "kitty", "a1");
+    (void)t.on(hypr::Urgent{"u1"});
+    EXPECT_EQ(t.replay(),
+              (Signals{signal::FocusChanged{"a1", "kitty"}, signal::UrgentRaised{"u1"}}));
+    (void)t.on(hypr::Disconnected{});
+    EXPECT_EQ(t.replay(), Signals{});
+}
+
 // An empty address means "nothing focused". The first event after a reset always emits (even for
 // nothing), and a repeat of "nothing focused" is ignored like any other repeat.
 TEST(HyprlandTracker, NothingFocusedIsAFocusStateLikeAnyOther) {

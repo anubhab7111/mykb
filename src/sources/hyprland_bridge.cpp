@@ -13,7 +13,16 @@ HyprlandBridge::HyprlandBridge(EventLoop &loop, HyprlandSource::PathFn path_fn, 
       source_(loop, std::move(path_fn), [this](const HyprEvent &ev) { on_hypr(ev); }) {}
 
 void HyprlandBridge::configure(bool reactions_on, bool fullscreen_wanted) {
-    reactions_on_ = reactions_on;
+    const bool switched_on = reactions_on && !reactions_on_;
+    reactions_on_ = reactions_on; // before the replay: `deliver` drops signals while it is off
+    if (switched_on) {
+        // P25: the tracker followed Hyprland while the signals were dropped. Say what it holds, or
+        // the focus stays unknown (and an urgent window dark) until another window gets the focus:
+        // the tracker ignores a repeat of the focused window (P15).
+        for (const Signal &s : tracker_.replay()) {
+            deliver(s);
+        }
+    }
     if (fullscreen_wanted == fullscreen_wanted_) {
         return;
     }

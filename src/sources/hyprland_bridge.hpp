@@ -27,7 +27,8 @@ class HyprlandBridge {
 
     /// Signals (workspace, windows, urgency, focus) are forwarded only while `reactions_on`. The
     /// fullscreen fact and the submap always are. The tracker follows Hyprland either way, so a
-    /// switch takes effect at once.
+    /// switch takes effect at once: on the change from off to on, the focus and urgent windows it
+    /// holds are delivered as signals, once (P25).
     ///
     /// While `fullscreen_wanted`, each request to look at fullscreen starts a query to the request
     /// socket next to the connected socket2, and the fact follows the answer. A failed query keeps
