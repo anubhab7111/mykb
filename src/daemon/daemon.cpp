@@ -675,7 +675,7 @@ int run_daemon(const RunOptions &opts) {
     const auto emit = [&d](const Event &e) { d.handle_event(e); };
     const auto sync_sources = [&](const Config &c) {
         if (hyprland) {
-            hyprland->configure(c.reactions.enabled);
+            hyprland->configure(c.reactions.enabled, c.needs_fullscreen());
         }
         if (theme_dir != c.theme.dir) {
             theme.reset();

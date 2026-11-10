@@ -1,40 +1,84 @@
 #include "sources/hyprland_bridge.hpp"
 
+#include "util/strings.hpp"
+
 #include <utility>
 #include <variant>
 
 namespace omenkbd {
 
-namespace {
-
-/// Delivers a tracker output; `signals_on` gates only the signals.
-struct Deliver {
-    const HyprlandBridge::Emit &emit;
-    bool signals_on;
-
-    void operator()(const Signal &s) const {
-        if (signals_on) {
-            emit(Event{s});
-        }
-    }
-    void operator()(const FactUpdate &f) const { emit(Event{f}); }
-    void operator()(const event::Submap &m) const { emit(Event{m}); }
-    void operator()(const CheckFullscreen & /*check*/) const {} // nothing queries fullscreen yet
-};
-
-} // namespace
-
 HyprlandBridge::HyprlandBridge(EventLoop &loop, HyprlandSource::PathFn path_fn, Emit emit)
     : emit_(std::move(emit)),
+      query_(loop, [this](const std::optional<ActiveWindowInfo> &info) { on_query_result(info); }),
       source_(loop, std::move(path_fn), [this](const HyprEvent &ev) { on_hypr(ev); }) {}
 
-void HyprlandBridge::configure(bool reactions_on) { reactions_on_ = reactions_on; }
+void HyprlandBridge::configure(bool reactions_on, bool fullscreen_wanted) {
+    reactions_on_ = reactions_on;
+    if (fullscreen_wanted == fullscreen_wanted_) {
+        return;
+    }
+    fullscreen_wanted_ = fullscreen_wanted;
+    if (fullscreen_wanted_) {
+        check_fullscreen(); // P21: the check that came with `Connected` was ignored
+    } else {
+        query_.cancel(); // a reply that is still on its way must not bring the fact back
+        set_fullscreen(std::nullopt);
+    }
+}
 
 void HyprlandBridge::on_hypr(const HyprEvent &ev) {
-    const Deliver deliver{emit_, reactions_on_};
-    for (const TrackerOut &out : tracker_.on(ev)) {
-        std::visit(deliver, out);
+    if (std::holds_alternative<hypr::Disconnected>(ev)) {
+        query_.cancel(); // what a Hyprland that is gone says no longer counts
     }
+    for (const TrackerOut &out : tracker_.on(ev)) {
+        std::visit([this](const auto &o) { deliver(o); }, out);
+    }
+}
+
+void HyprlandBridge::deliver(const Signal &s) {
+    if (reactions_on_) {
+        emit_(Event{s});
+    }
+}
+
+void HyprlandBridge::deliver(const FactUpdate &f) {
+    if (const auto *fullscreen = std::get_if<fact::FullscreenApp>(&f)) {
+        fullscreen_ = fullscreen->v; // the tracker clears it on a disconnect; remember that
+    }
+    emit_(Event{f});
+}
+
+void HyprlandBridge::deliver(const event::Submap &m) { emit_(Event{m}); }
+
+void HyprlandBridge::deliver(const CheckFullscreen & /*check*/) { check_fullscreen(); }
+
+void HyprlandBridge::check_fullscreen() {
+    // Not wanted comes first: `Connected` arrives while `source_` is still being constructed.
+    if (!fullscreen_wanted_) {
+        return;
+    }
+    if (const auto &socket2 = source_.connected_path()) {
+        query_.request(socket2->parent_path() / ".socket.sock");
+    }
+}
+
+void HyprlandBridge::on_query_result(const std::optional<ActiveWindowInfo> &info) {
+    if (!info) {
+        return; // the query failed: keep what we know
+    }
+    if (is_true_fullscreen(info->fullscreen)) {
+        set_fullscreen(to_lower(info->app_class)); // rules compare lowercased classes
+    } else {
+        set_fullscreen(std::nullopt); // also what "no window is focused" comes to
+    }
+}
+
+void HyprlandBridge::set_fullscreen(std::optional<std::string> app) {
+    if (app == fullscreen_) {
+        return;
+    }
+    fullscreen_ = std::move(app);
+    emit_(Event{FactUpdate{fact::FullscreenApp{fullscreen_}}});
 }
 
 } // namespace omenkbd

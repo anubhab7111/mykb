@@ -144,6 +144,19 @@ std::expected<UniqueFd, IpcError> bind_socket(const std::filesystem::path &path)
     return fd;
 }
 
+UniqueFd connect_nonblocking(const std::filesystem::path &path) {
+    const auto addr = make_addr(path);
+    if (!addr) {
+        return UniqueFd();
+    }
+    UniqueFd fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
+    if (!fd ||
+        ::connect(fd.get(), reinterpret_cast<const sockaddr *>(&*addr), sizeof(*addr)) != 0) {
+        return UniqueFd();
+    }
+    return fd;
+}
+
 std::optional<std::string> LineBuffer::next_line() {
     const auto nl = buf_.find('\n');
     if (nl == std::string::npos) {
