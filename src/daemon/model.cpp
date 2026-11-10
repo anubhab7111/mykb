@@ -38,6 +38,7 @@ Model::Model(Config config, Palette palette, PersistedState persisted, std::stri
     : config_(std::move(config)), palette_(std::move(palette)), persisted_(std::move(persisted)),
       backend_(std::move(backend)) {
     fix_active_profile();
+    reconfigure_reactions();
 }
 
 std::expected<Change, std::string> Model::handle(const Request &r, TimePoint now) {
@@ -184,6 +185,17 @@ void Model::replace_config(Config config, Palette palette) {
     if (hint_ && !config_.hints.modifiers.contains(hint_->first)) {
         hint_.reset();
     }
+    reconfigure_reactions();
+    // The cached deadline was worked out under the old timings: a shorter TTL or blink would leave
+    // it too late, and the daemon would sleep through the change.
+    if (reactions_at_) {
+        reactions_.update(*reactions_at_, visibility(rules()));
+    }
+}
+
+void Model::set_palette(Palette palette) {
+    palette_ = std::move(palette);
+    restyle_reactions();
 }
 
 void Model::apply_fact(const FactUpdate &f) {
@@ -216,7 +228,24 @@ void Model::set_suspended(bool s) {
     suspended_ = s;
     if (s) {
         hint_.reset();
+        reactions_.suppress();
     }
+}
+
+void Model::apply_signal(const Signal &s, TimePoint now) {
+    reactions_.on_signal(s, now, visibility(rules()));
+    reactions_at_ = now;
+}
+
+std::optional<TimePoint> Model::reaction_deadline() const {
+    if (suspended_) {
+        return std::nullopt;
+    }
+    return reactions_.next_change();
+}
+
+bool Model::backlight_reading_fresh(TimePoint now, Duration max_age) const {
+    return hw_backlight_at_ && now - *hw_backlight_at_ <= max_age;
 }
 
 void Model::set_submap(std::optional<std::string> name) {
@@ -270,6 +299,9 @@ std::optional<Inputs> Model::inputs(TimePoint now) {
         return std::nullopt;
     }
     const RuleOutcome r = rules();
+    reactions_.update(now, visibility(r));
+    reactions_at_ = now;
+    const Layers layers = reactions_.layers(now);
     std::vector<std::string> warnings;
     auto [base, effect, speed] = profile_look(shown_profile(r), warnings);
     if (persisted_.effect_override) {
@@ -292,7 +324,9 @@ std::optional<Inputs> Model::inputs(TimePoint now) {
               .overlay = std::move(overlay),
               .hint = hint_color(warnings),
               .brightness = effective_brightness(r),
-              .backlight = backlight_wanted()};
+              .backlight = backlight_wanted(),
+              .lamps = layers.lamps,
+              .transient = layers.transient};
     frame_warnings_ = std::move(warnings);
     return in;
 }
@@ -327,6 +361,10 @@ Status Model::status(const Output *out) const {
     for (const auto &w : frame_warnings_) {
         push_unique(s.warnings, w);
     }
+    for (const auto &w : reaction_warnings_) {
+        push_unique(s.warnings, w);
+    }
+    s.reactions = reactions_.status();
     return s;
 }
 
@@ -370,6 +408,31 @@ bool Model::backlight_wanted() const {
     const auto &g = config_.gates;
     return persisted_.on && !lid_closed_ && !(facts_.locked && g.on_lock == GateAction::Off) &&
            !(facts_.idle && g.on_idle == GateAction::Off);
+}
+
+Visibility Model::visibility(const RuleOutcome &r) const {
+    // The firmware's off (the Fn key) and a spent budget keep the zones from showing although the
+    // composed frame says "on".
+    const bool keyboard_visible = !suspended_ && backlight_wanted() &&
+                                  effective_brightness(r) > 0 && hw_backlight_ != false &&
+                                  !budget_exhausted_;
+    return Visibility{keyboard_visible, !facts_.locked && !facts_.idle};
+}
+
+void Model::reconfigure_reactions() {
+    std::vector<std::string> warnings;
+    reactions_.reconfigure(config_.reactions,
+                           [this, &warnings](const ColorRef &c) { return resolve(c, warnings); });
+    // Off, the colors are resolved for nothing anyone sees: they warn about nothing.
+    reaction_warnings_ =
+        config_.reactions.enabled ? std::move(warnings) : std::vector<std::string>{};
+}
+
+void Model::restyle_reactions() {
+    std::vector<std::string> warnings;
+    reactions_.restyle([this, &warnings](const ColorRef &c) { return resolve(c, warnings); });
+    reaction_warnings_ =
+        config_.reactions.enabled ? std::move(warnings) : std::vector<std::string>{};
 }
 
 bool Model::user_on() const {

@@ -128,7 +128,7 @@ void Daemon::handle_event(const Event &ev) {
                     model_.add_warning(p.error());
                 }
             } else if constexpr (std::is_same_v<T, event::HwBacklight>) {
-                model_.set_hw_backlight(e.on);
+                model_.set_hw_backlight(e.on, Clock::now());
             }
         },
         ev);
@@ -429,7 +429,7 @@ void Daemon::on_writer() {
                 continue;
             }
             if (probe.result) {
-                model_.set_hw_backlight(*probe.result);
+                model_.set_hw_backlight(*probe.result, Clock::now());
                 recompute();
             }
             // A failed probe is not actionable: waiters go on with what the daemon knows, and

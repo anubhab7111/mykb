@@ -133,6 +133,45 @@ TEST(Ipc, StatusFactsRoundTripFullscreenApp) {
     EXPECT_EQ(older->status.value().profile, "default");
 }
 
+TEST(Ipc, StatusReactionsRoundTrip) {
+    Status s;
+    s.profile = "default";
+    s.reactions = ReactionsStatus{true, {"agent", "urgent"}, "workspace"};
+    const std::string wire = encode(Response::success(s));
+    EXPECT_NE(
+        wire.find(
+            R"("reactions":{"enabled":true,"lamps":["agent","urgent"],"playing":"workspace"})"),
+        std::string::npos)
+        << wire;
+    const auto back = decode_response(wire);
+    ASSERT_TRUE(back.has_value()) << back.error();
+    EXPECT_EQ(back->status.value().reactions, s.reactions);
+
+    s.reactions = ReactionsStatus{false, {}, std::nullopt};
+    const std::string idle = encode(Response::success(s));
+    EXPECT_NE(idle.find(R"("reactions":{"enabled":false,"lamps":[],"playing":null})"),
+              std::string::npos)
+        << idle;
+    const auto back_idle = decode_response(idle);
+    ASSERT_TRUE(back_idle.has_value()) << back_idle.error();
+    EXPECT_EQ(*back_idle, Response::success(s));
+}
+
+TEST(Ipc, StatusWithoutReactionsStillDecodes) {
+    Status s;
+    s.profile = "default";
+    s.reactions = ReactionsStatus{true, {"agent"}, "notify"};
+    std::string wire = encode(Response::success(s));
+    const std::size_t from = wire.find(R"(,"reactions":{)");
+    ASSERT_NE(from, std::string::npos) << wire;
+    wire.erase(from, wire.find('}', from) + 1 - from); // JSON from a daemon that predates it
+    ASSERT_EQ(wire.find("reactions"), std::string::npos) << wire;
+    const auto older = decode_response(wire);
+    ASSERT_TRUE(older.has_value()) << older.error();
+    EXPECT_EQ(older->status.value().reactions, ReactionsStatus{});
+    EXPECT_EQ(older->status.value().profile, "default");
+}
+
 // Error text can quote raw bytes: nlohmann's parse errors echo the offending byte (a bad request
 // line, a corrupt state file's warning), and CLI arguments arrive in any encoding. Encoding
 // replaces invalid UTF-8 with U+FFFD; throwing would end the daemon (or abort the CLI).

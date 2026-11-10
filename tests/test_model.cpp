@@ -55,6 +55,41 @@ Model hex_model() {
                  "mock");
 }
 
+constexpr Rgb kSweep{0x0a, 0x14, 0x1e};
+constexpr Rgb kUrgent{0xe6, 0x28, 0x28};
+constexpr Rgb kPeach{0xfa, 0xb3, 0x87}; // theme:peach in palette()
+
+/// Reactions on, over a static profile. The lamp's color comes from the theme, as is.
+constexpr std::string_view kReactCfg = R"(
+[theme]
+colors = "exact"
+[reactions]
+[reactions.workspace]
+color = "#0a141e"
+[reactions.urgent]
+color = "#e62828"
+[reactions.agent]
+waiting = "theme:peach"
+ttl_s = 3600
+[[profiles]]
+name = "plain"
+colors = ["#101010", "#202020", "#303030", "#404040"]
+)";
+
+Model react_model(std::string_view cfg = kReactCfg) {
+    return Model(parse_config(cfg).value(), palette(), PersistedState::default_for("plain"),
+                 "mock");
+}
+
+/// A layer that paints `color` on `zones` only.
+LayerOps lit(Rgb color, std::initializer_list<Zone> zones) {
+    LayerOps ops;
+    for (Zone z : zones) {
+        ops[index(z)] = Paint{color};
+    }
+    return ops;
+}
+
 std::expected<Change, std::string> req_(Model &m, Request r) { return m.handle(r, Clock::now()); }
 
 std::expected<Change, std::string> set(Model &m, std::vector<std::string> colors) {
@@ -196,7 +231,7 @@ TEST(Model, BatteryPausesEffects) {
 
 TEST(Model, FnKeyOffPausesButKeepsProbing) {
     Model m = hex_model();
-    m.set_hw_backlight(false);
+    m.set_hw_backlight(false, Clock::now());
     EXPECT_FALSE(in(m).animate);
     EXPECT_TRUE(m.wants_animation()) << "keep probing so the Fn key can resume it";
 }
@@ -336,4 +371,172 @@ TEST(Model, StatusReportsOutputZones) {
     EXPECT_EQ(s.profile, "custom");
     EXPECT_EQ(s.backend, "mock");
     EXPECT_TRUE(s.backlight);
+}
+
+TEST(Model, InputsCarryTheReactionLayersAndTheDeadline) {
+    Model m = react_model();
+    const TimePoint t0 = Clock::now();
+    EXPECT_EQ(m.reaction_deadline(), std::nullopt);
+    m.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
+    m.apply_signal(signal::UrgentRaised{"a1"}, t0);
+    EXPECT_EQ(m.reaction_deadline(), t0 + 120ms);
+
+    const Inputs at0 = m.inputs(t0).value();
+    EXPECT_EQ(at0.transient, lit(kSweep, {Zone::Left, Zone::Wasd}));
+    EXPECT_EQ(at0.lamps, lit(kUrgent, {Zone::Right}));
+
+    const Inputs later = m.inputs(t0 + 150ms).value();
+    EXPECT_EQ(later.transient, lit(kSweep, {Zone::Middle}));
+    EXPECT_TRUE(empty(later.lamps)) << "the intro's dark phase";
+    EXPECT_EQ(m.reaction_deadline(), t0 + 240ms);
+}
+
+TEST(Model, ReactionsOffChangeNothing) {
+    Model m = hex_model(); // no [reactions] table
+    const TimePoint t0 = Clock::now();
+    const Inputs before = m.inputs(t0).value();
+    m.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
+    m.apply_signal(signal::UrgentRaised{"a1"}, t0);
+    m.apply_signal(signal::AgentWaiting{"s1", std::nullopt}, t0);
+    EXPECT_EQ(m.inputs(t0).value(), before);
+    EXPECT_EQ(m.reaction_deadline(), std::nullopt);
+    EXPECT_EQ(m.status(nullptr).reactions, ReactionsStatus{});
+}
+
+TEST(Model, SuspendClearsClipsButKeepsLamps) {
+    Model m = react_model();
+    const TimePoint t0 = Clock::now();
+    m.apply_signal(signal::AgentWaiting{"s1", std::nullopt}, t0);
+    ASSERT_TRUE(m.inputs(t0 + 1s).has_value()); // the intro is over
+    m.apply_signal(signal::WorkspaceSwitched{1, 2}, t0 + 1s);
+    ASSERT_EQ(m.status(nullptr).reactions.playing, "workspace");
+    ASSERT_EQ(m.reaction_deadline(), t0 + 1s + 120ms);
+
+    m.set_suspended(true);
+    EXPECT_EQ(m.reaction_deadline(), std::nullopt) << "nothing to wake for while suspended";
+    EXPECT_FALSE(m.inputs(t0 + 1s + 10ms).has_value());
+    EXPECT_EQ(m.status(nullptr).reactions, (ReactionsStatus{true, {"agent"}, std::nullopt}));
+
+    m.set_suspended(false);
+    const Inputs in = m.inputs(t0 + 1s + 20ms).value();
+    EXPECT_TRUE(empty(in.transient)) << "the sweep is gone, not resumed";
+    EXPECT_EQ(in.lamps, lit(kPeach, {Zone::Wasd})) << "the lamp holds";
+    EXPECT_EQ(m.reaction_deadline(), t0 + 3600s) << "only the TTL is left";
+}
+
+TEST(Model, PaletteChangeRestylesLamps) {
+    Model m = react_model();
+    const TimePoint t0 = Clock::now();
+    m.apply_signal(signal::AgentWaiting{"s1", std::nullopt}, t0);
+    EXPECT_EQ(m.inputs(t0 + 1s)->lamps, lit(kPeach, {Zone::Wasd}));
+
+    m.set_palette(Palette::from_waybar_css("@define-color peach #102030;\n"));
+    EXPECT_EQ(m.inputs(t0 + 2s)->lamps, lit(Rgb{0x10, 0x20, 0x30}, {Zone::Wasd}));
+    EXPECT_EQ(m.status(nullptr).reactions.lamps, std::vector<std::string>{"agent"});
+}
+
+TEST(Model, HwBacklightReadingIsFreshFor5s) {
+    Model m = react_model();
+    const TimePoint t0 = Clock::now();
+    EXPECT_FALSE(m.backlight_reading_fresh(t0, 5s)) << "never read";
+    m.set_hw_backlight(true, t0);
+    EXPECT_TRUE(m.backlight_reading_fresh(t0, 5s));
+    EXPECT_TRUE(m.backlight_reading_fresh(t0 + 5s, 5s));
+    EXPECT_FALSE(m.backlight_reading_fresh(t0 + 5s + 1ms, 5s));
+
+    m.set_hw_backlight(false, t0 + 10s);
+    EXPECT_TRUE(m.backlight_reading_fresh(t0 + 12s, 5s)) << "a reading of off is a reading too";
+    m.forget_hw_backlight();
+    EXPECT_FALSE(m.backlight_reading_fresh(t0 + 12s, 5s))
+        << "forgetting the reading forgets its time";
+}
+
+TEST(Model, StatusReportsReactions) {
+    Model m = react_model();
+    const TimePoint t0 = Clock::now();
+    EXPECT_EQ(m.status(nullptr).reactions, (ReactionsStatus{true, {}, std::nullopt}));
+    m.apply_signal(signal::UrgentRaised{"a1"}, t0);
+    m.apply_signal(signal::AgentWaiting{"s1", std::nullopt}, t0);
+    m.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
+    EXPECT_EQ(m.status(nullptr).reactions,
+              (ReactionsStatus{true, {"agent", "urgent"}, "workspace"}));
+    ASSERT_TRUE(m.inputs(t0 + 1s).has_value());
+    EXPECT_EQ(m.status(nullptr).reactions,
+              (ReactionsStatus{true, {"agent", "urgent"}, std::nullopt}));
+
+    EXPECT_EQ(hex_model().status(nullptr).reactions, ReactionsStatus{}) << "no [reactions] table";
+}
+
+// The keyboard counts as visible only while the backlight is on, the frame is not dark, the
+// firmware did not report the backlight off, and the write budget is not spent.
+TEST(Model, ReactionsNeedAVisibleKeyboard) {
+    const TimePoint t0 = Clock::now();
+    Model fn = react_model();
+    fn.set_hw_backlight(false, t0); // the Fn key
+    fn.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
+    fn.apply_signal(signal::UrgentRaised{"a1"}, t0);
+    Inputs in = fn.inputs(t0).value();
+    EXPECT_TRUE(empty(in.transient));
+    EXPECT_TRUE(empty(in.lamps));
+    fn.set_hw_backlight(true, t0 + 1s);
+    EXPECT_EQ(fn.inputs(t0 + 1s)->lamps, lit(kUrgent, {Zone::Right})) << "steady, no intro";
+    EXPECT_EQ(fn.reaction_deadline(), std::nullopt);
+
+    Model budget = react_model();
+    budget.record_write(std::unexpected(BackendError{BackendError::Kind::Budget, ""}));
+    budget.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
+    budget.apply_signal(signal::UrgentRaised{"a1"}, t0);
+    in = budget.inputs(t0).value();
+    EXPECT_TRUE(empty(in.transient));
+    EXPECT_TRUE(empty(in.lamps));
+
+    Model dark = react_model();
+    ASSERT_TRUE(dark.handle(req::Brightness{"0"}, t0).has_value());
+    dark.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
+    EXPECT_TRUE(empty(dark.inputs(t0)->transient));
+
+    // A dimmed keyboard is still visible: a lamp shows while the user is idle, a clip does not.
+    Model idle = react_model();
+    ASSERT_TRUE(idle.handle(req::Idle{true}, t0).has_value()); // on_idle = dim
+    idle.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
+    idle.apply_signal(signal::UrgentRaised{"a1"}, t0);
+    in = idle.inputs(t0).value();
+    EXPECT_TRUE(empty(in.transient));
+    EXPECT_EQ(in.lamps, lit(kUrgent, {Zone::Right}));
+}
+
+// Ruling P14 (b): a reload can shorten the TTL or the blinks, so the deadline is refreshed with
+// it, before any new frame.
+TEST(Model, ReloadRefreshesTheReactionDeadline) {
+    Model m = react_model();
+    const TimePoint t0 = Clock::now();
+    m.apply_signal(signal::AgentWaiting{"s1", std::nullopt}, t0);
+    ASSERT_TRUE(m.inputs(t0 + 1s).has_value());
+    ASSERT_EQ(m.reaction_deadline(), t0 + 3600s);
+
+    std::string shorter(kReactCfg);
+    shorter.replace(shorter.find("ttl_s = 3600"), 12, "ttl_s = 60");
+    m.replace_config(parse_config(shorter).value(), palette());
+    EXPECT_EQ(m.reaction_deadline(), t0 + 60s);
+    EXPECT_EQ(m.status(nullptr).reactions.lamps, std::vector<std::string>{"agent"});
+}
+
+TEST(Model, ReactionColorWarningsShowOnlyWhileEnabled) {
+    std::string cfg(kReactCfg);
+    cfg.replace(cfg.find("#0a141e"), 7, "theme:nope");
+    const auto warned = [](const Model &m) {
+        const auto w = m.status(nullptr).warnings;
+        return std::ranges::any_of(
+            w, [](const std::string &s) { return contains(s, "unknown theme color: nope"); });
+    };
+    Model on = react_model(cfg);
+    EXPECT_TRUE(warned(on));
+
+    // Fixed by a reload, the warning goes.
+    on.replace_config(parse_config(kReactCfg).value(), palette());
+    EXPECT_FALSE(warned(on));
+
+    // Reactions off resolve nothing anyone would see, so they warn about nothing.
+    cfg.replace(cfg.find("[reactions]\n"), 12, "[reactions]\nenabled = false\n");
+    EXPECT_FALSE(warned(react_model(cfg)));
 }
