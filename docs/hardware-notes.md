@@ -357,3 +357,54 @@ All ten steps passed. The package is installed, the module loads at every boot, 
   `omen-kbd flag locked off; omen-kbd idle off`.
 - On-battery rules and the effect pause on battery are untested: the battery is dead.
 - The daemon does not save the game-mode flag across its own restarts.
+
+## Reactions live checks (2026-11-11)
+
+Keyboard reactions on the real keyboard: a Release build installed into `~/.local`, the three
+snippets applied, a static profile (all four zones `#26BCFF`). Each reaction's cost is the change in
+`lifetime_writes` (read through `omen-kbd status --json`) against the design's table. Nothing was
+written under `/sys` outside the daemon; the zones were read back from `/sys/devices/platform/
+hp-omen-kbd/zones`.
+
+| Reaction | Design | Measured |
+|---|---|---|
+| Workspace sweep, up and down | 4 | 4, 4 |
+| Window opened | 2 | 2 |
+| Window closed | 2 | 2 (an urgent window's lamp clears in the same two writes) |
+| Attention light: light, hold 8 s, clear by focus | 3, 0, 1 | 3, 0, 1 |
+| Notification flash, CLI | 2 | 2 |
+| Notification from the focused app, low urgency | 0 | 0, 0 |
+| Notification flash, swaync (`notify-send -a zapzap`) | 2 | 2 |
+| Claude lamp through the CLI: waiting, held 10 s, working, done | 3, 0, 1, 2 | 3, 0, 1, 2 |
+| Installed hook, simulated events: permission, held, `PostToolUse` twice, `Stop` | 3, 0, 1 then 0, 2 | 3, 0, 1 then 0, 2 |
+| Real Claude Code session: waiting lamp | 3 | 3 |
+| Fullscreen dim in, out (a terminal with class `mpv`, put in true fullscreen) | 1, 1 | 1, 1 (zones `26BCFF` to `061C26`, 15%, and back) |
+
+**Found during the live checks:**
+- **No spec change was needed for the costs.** Every number above matched. The one open question
+  (does the terminal go urgent before the Claude hook?) is answered: a real `permission_prompt`
+  did not raise `urgent`, so a waiting episode costs 3 + 1. A bell does raise `urgent` in Alacritty
+  (a helper terminal's bell lit the attention light 3.1 s later), so a setup that rings it would show
+  the lamp replacing the attention light.
+- **The hook links the real window.** For an interactive session (`alacritty` > `bash` > `claude`) it
+  passed the terminal's address, which matched `hyprctl clients`. A finish while that window is
+  focused flashed nothing (0 writes, twice); a finish while it was not focused flashed (2).
+- **The idle prompt lights the lamp.** Exactly 60 s after a real session's turn ended, Claude Code's
+  `idle_prompt` notification raised the waiting lamp, which stays until the terminal is focused or a
+  prompt is sent. This is by design (it is in the hook's matcher) and costs the usual 3.
+- **`colors = "vivid"` turns `theme:peach` into orange.** The waiting lamp read back as `FF7926`
+  on the hardware. It was accepted as amber, and `#ffb000` is the exact alternative.
+- **The approve-and-finish step once measured 3 instead of 1.** The likeliest cause is that the
+  Claude terminal was not focused when the turn ended (clear 1 plus a finish flash 2); the focused
+  and unfocused finish were each confirmed separately above. It is recorded, not reproduced.
+
+**Notes for repeating the checks on this machine:**
+- Hyprland 0.57 uses a Lua config, and `hyprctl dispatch` takes Lua expressions such as
+  `hl.dsp.focus({ workspace = "3" })`. The old `workspace 3` and `exec [silent] ...` forms are rejected
+  with exit 7, so a script that ignores the exit code silently does nothing.
+- A window opened with the `no_focus` rule can never be focused by a later dispatch.
+- Claude Code asks no permission for read-only commands such as `ls`, and may be in `auto` mode:
+  use `claude --permission-mode manual` and ask for a file to be written.
+- Do not click away from the fullscreen window while measuring the dim: leaving it undims.
+- `~/.claude/settings.json` must stay one JSON object; hooks pasted after the closing brace made the
+  file invalid, and every hook-driven step then measured 0.

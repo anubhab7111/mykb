@@ -19,7 +19,7 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 | Kernel module `hp_omen_kbd` | Tested in a VM against a firmware emulator, and validated on this laptop's real firmware (P4, 2026-11-06). The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
 | Hardware validation | Done (P4): `docs/hardware-validation.md`, results in `docs/hardware-notes.md`. |
 | Install and soak | Done (P5, 2026-11-07): installed, autostarted, all desktop hooks working; results in `docs/hardware-notes.md`. |
-| Reactions | Built and unit-tested against the mock backend and fake Hyprland, swaync and Claude Code inputs ([Reactions](#reactions)). The three producer snippets are not applied yet, and the live checks on the real keyboard are pending. |
+| Reactions | Done. Unit-tested against the mock backend and fake Hyprland, swaync and Claude Code inputs, and live-checked on this laptop's real keyboard (2026-11-11): every write cost matched the design ([Reactions](#reactions)); results in `docs/hardware-notes.md`. |
 
 ## Safety
 
@@ -144,6 +144,10 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
   `PostToolUse` and `PostToolUseFailure` events carry the parent session's `session_id`, so a busy
   subagent can clear a waiting lamp early. That is deliberate: filtering on `agent_id` would leave
   the lamp stuck after a subagent's own permission prompt is approved.
+- **Idle prompt.** About a minute after a turn ends, Claude Code's idle notification lights the same
+  waiting lamp if you have not come back. Focusing the terminal or sending a prompt clears it.
+- **Colors on the keyboard.** With `[theme] colors = "vivid"`, `theme:` colors are boosted: the default
+  `theme:peach` shows as orange (`#ff7926`) on the zones. For a true amber use `"#ffb000"`.
 - **Layers, bottom to top:** profile or effect, rule overlay, lamps, mode hint (Super, Ctrl,
   submap), short reaction, brightness caps and the backlight gates. A held modifier hides the lamps
   while it is held; a notification during fullscreen video flashes at the dimmed brightness.
@@ -192,8 +196,10 @@ omen-kbd never edits these files itself.
    detached and with its output sent to `/dev/null`.
 10. **Claude lamp:** `claude-code-hooks.json` and the hook script. `cmake --install` puts
     `omen-kbd-agent-hook` next to `omen-kbd`, in `~/.local/bin`; it needs `jq`. Merge the `hooks`
-    entries of the JSON file into `~/.claude/settings.json`, next to the existing `SessionStart`
-    hook. The three busy events (`UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`) run with
+    entries of the JSON file into the existing `hooks` object of `~/.claude/settings.json`, next to
+    the `SessionStart` hook. Do not paste the file after the closing brace: two top-level objects
+    are not valid JSON (`jq -s length ~/.claude/settings.json` must print `1`). Only sessions
+    started after the change read it. The three busy events (`UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`) run with
     `"async": true`, so the hook cannot slow Claude Code. Every `omen-kbd` and `hyprctl` call
     inside it is capped at about 1 s (1.5 s worst case).
 
