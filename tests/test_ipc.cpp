@@ -66,6 +66,10 @@ TEST(Ipc, EveryRequestRoundtrips) {
         req::Flag{"gamemode", false},
         req::Reload{},
         req::Subscribe{},
+        req::Notify{"ZapZap", "com.rtosta.zapzap", "critical"},
+        req::Notify{"", "", "normal"},
+        req::Agent{"waiting", "s1", "0xabc", "claude"},
+        req::Agent{"end", "s1", std::nullopt, "claude"},
     };
     for (const Request &r : all) {
         const auto back = decode_request(encode(r));
@@ -74,6 +78,162 @@ TEST(Ipc, EveryRequestRoundtrips) {
     }
     EXPECT_TRUE(decode_request(R"({"cmd":"effect","name":"wave"})").has_value())
         << "speed may be omitted";
+}
+
+TEST(Ipc, NotifyRoundTripsWithKebabCaseKeys) {
+    const Request notify{req::Notify{"ZapZap", "com.rtosta.zapzap", "critical"}};
+    EXPECT_EQ(
+        encode(notify),
+        R"({"cmd":"notify","app":"ZapZap","desktop-entry":"com.rtosta.zapzap","urgency":"critical"})");
+    const auto back = decode_request(encode(notify));
+    ASSERT_TRUE(back.has_value()) << back.error();
+    EXPECT_EQ(*back, notify);
+    EXPECT_FALSE(decode_request(R"({"cmd":"notify","app":"ZapZap"})").has_value())
+        << "every notify field is required on the wire";
+}
+
+TEST(Ipc, AgentRoundTripsWithAndWithoutWindow) {
+    const Request with{req::Agent{"waiting", "s1", "0xabc", "claude"}};
+    EXPECT_EQ(
+        encode(with),
+        R"({"cmd":"agent","state":"waiting","session":"s1","window":"0xabc","source":"claude"})");
+    const auto with_back = decode_request(encode(with));
+    ASSERT_TRUE(with_back.has_value()) << with_back.error();
+    EXPECT_EQ(*with_back, with);
+
+    const Request without{req::Agent{"end", "s1", std::nullopt, "other"}};
+    EXPECT_EQ(encode(without),
+              R"({"cmd":"agent","state":"end","session":"s1","window":null,"source":"other"})");
+    const auto without_back = decode_request(encode(without));
+    ASSERT_TRUE(without_back.has_value()) << without_back.error();
+    EXPECT_EQ(*without_back, without);
+    const auto *agent = std::get_if<req::Agent>(&*without_back);
+    ASSERT_NE(agent, nullptr);
+    EXPECT_FALSE(agent->window.has_value());
+
+    EXPECT_FALSE(decode_request(R"({"cmd":"agent","state":"done","source":"claude"})").has_value())
+        << "the session is required on the wire";
+}
+
+namespace {
+
+/// What `to_signal` made of a request that must be a signal; fails the test otherwise.
+std::optional<Signal> signal_of(const Request &r) {
+    const auto s = to_signal(r);
+    EXPECT_TRUE(s.has_value()) << "not a signal request";
+    if (!s) {
+        return std::nullopt;
+    }
+    EXPECT_TRUE(s->has_value()) << s->error();
+    if (!*s) {
+        return std::nullopt;
+    }
+    return **s;
+}
+
+/// The error `to_signal` gave for a request that must be a bad signal request; empty otherwise.
+std::string signal_error_of(const Request &r) {
+    const auto s = to_signal(r);
+    EXPECT_TRUE(s.has_value()) << "not a signal request";
+    if (!s) {
+        return {};
+    }
+    EXPECT_FALSE(s->has_value()) << "expected an error";
+    return s->has_value() ? std::string{} : s->error();
+}
+
+/// An `agent` request from session "s" (the commas of an aggregate would split a macro argument).
+Request agent_request(std::string state, std::optional<std::string> window) {
+    return req::Agent{std::move(state), "s", std::move(window), "claude"};
+}
+
+Request notify_request(std::string urgency) {
+    return req::Notify{"ZapZap", "com.rtosta.zapzap", std::move(urgency)};
+}
+
+} // namespace
+
+TEST(Ipc, ToSignalMapsEveryStateAndNormalizesTheWindow) {
+    EXPECT_EQ(signal_of(notify_request("Critical")),
+              (Signal{signal::Notified{"ZapZap", "com.rtosta.zapzap", Urgency::Critical}}));
+
+    // R8: lowercase hex without `0x`; the hook sends the address as `hyprctl clients -j` prints it.
+    EXPECT_EQ(signal_of(agent_request("waiting", "0xABC")),
+              (Signal{signal::AgentWaiting{"s", "abc"}}));
+    EXPECT_EQ(signal_of(agent_request("done", "0x55666F363B20")),
+              (Signal{signal::AgentDone{"s", "55666f363b20"}}));
+    EXPECT_EQ(signal_of(agent_request("waiting", "ABC")),
+              (Signal{signal::AgentWaiting{"s", "abc"}}))
+        << "no prefix is fine";
+    EXPECT_EQ(signal_of(agent_request("waiting", "0Xab")),
+              (Signal{signal::AgentWaiting{"s", "ab"}}))
+        << "the prefix is matched in either case";
+    EXPECT_EQ(signal_of(agent_request("waiting", std::nullopt)),
+              (Signal{signal::AgentWaiting{"s", std::nullopt}}));
+    EXPECT_EQ(signal_of(agent_request("done", std::nullopt)),
+              (Signal{signal::AgentDone{"s", std::nullopt}}));
+
+    // `working` and `end` carry no window, whatever the request says.
+    EXPECT_EQ(signal_of(agent_request("working", std::nullopt)),
+              (Signal{signal::AgentWorking{"s"}}));
+    EXPECT_EQ(signal_of(agent_request("working", "0xabc")), (Signal{signal::AgentWorking{"s"}}));
+    EXPECT_EQ(signal_of(agent_request("end", std::nullopt)), (Signal{signal::AgentEnded{"s"}}));
+    EXPECT_EQ(signal_of(agent_request("end", "0xabc")), (Signal{signal::AgentEnded{"s"}}));
+
+    // A bad state or urgency is an error; a request that is not a signal is nullopt.
+    EXPECT_FALSE(signal_error_of(agent_request("sleeping", std::nullopt)).empty());
+    EXPECT_FALSE(signal_error_of(notify_request("urgent")).empty());
+    EXPECT_FALSE(to_signal(req::Status{}).has_value());
+}
+
+TEST(Ipc, ToSignalAcceptsUrgencyInAnyCase) {
+    const std::pair<const char *, Urgency> cases[] = {
+        {"low", Urgency::Low},           {"Low", Urgency::Low},
+        {"NORMAL", Urgency::Normal},     {"normal", Urgency::Normal},
+        {"Critical", Urgency::Critical}, {"critical", Urgency::Critical},
+    };
+    for (const auto &[text, urgency] : cases) {
+        EXPECT_EQ(signal_of(notify_request(text)),
+                  (Signal{signal::Notified{"ZapZap", "com.rtosta.zapzap", urgency}}))
+            << text;
+    }
+    // swaync leaves the app name and the desktop entry empty for some senders.
+    EXPECT_EQ(signal_of(req::Notify{"", "", "normal"}),
+              (Signal{signal::Notified{"", "", Urgency::Normal}}));
+}
+
+TEST(Ipc, ToSignalMapsAnEmptyWindowToNone) {
+    // R8 and the Task 10 review: no key may ever be linked to an empty address.
+    for (const char *empty : {"", "0x", "0X"}) {
+        EXPECT_EQ(signal_of(agent_request("waiting", empty)),
+                  (Signal{signal::AgentWaiting{"s", std::nullopt}}))
+            << '"' << empty << '"';
+        EXPECT_EQ(signal_of(agent_request("done", empty)),
+                  (Signal{signal::AgentDone{"s", std::nullopt}}))
+            << '"' << empty << '"';
+    }
+}
+
+TEST(Ipc, ToSignalRejectsABadStateOrUrgency) {
+    const std::string state = signal_error_of(agent_request("sleeping", std::nullopt));
+    EXPECT_NE(state.find("sleeping"), std::string::npos) << state;
+    EXPECT_NE(state.find("state"), std::string::npos) << state;
+    EXPECT_FALSE(signal_error_of(agent_request("", std::nullopt)).empty());
+    EXPECT_FALSE(signal_error_of(agent_request("Waiting", std::nullopt)).empty())
+        << "states are lowercase";
+
+    const std::string urgency = signal_error_of(notify_request("urgent"));
+    EXPECT_NE(urgency.find("urgent"), std::string::npos) << urgency;
+    EXPECT_NE(urgency.find("urgency"), std::string::npos) << urgency;
+    EXPECT_FALSE(signal_error_of(notify_request("")).empty());
+}
+
+TEST(Ipc, ToSignalIsNulloptForRequestsThatAreNotSignals) {
+    EXPECT_FALSE(to_signal(req::Status{}).has_value());
+    EXPECT_FALSE(to_signal(req::Subscribe{}).has_value());
+    EXPECT_FALSE(to_signal(req::Reload{}).has_value());
+    EXPECT_FALSE(to_signal(req::Hint{"super"}).has_value());
+    EXPECT_FALSE(to_signal(req::Power{req::PowerAction::Toggle}).has_value());
 }
 
 TEST(Ipc, StatusResponseRoundtrips) {

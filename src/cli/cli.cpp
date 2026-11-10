@@ -4,6 +4,7 @@
 #include "cli/format.hpp"
 #include "cli/gen_hyprland.hpp"
 #include "config.hpp"
+#include "core/signals.hpp"
 #include "daemon/daemon.hpp"
 #include "ipc/socket.hpp"
 #include "state.hpp"
@@ -38,6 +39,13 @@ struct Args {
     std::string a;
     std::string b;
     int speed = 0;
+
+    std::string app;
+    std::string desktop_entry;
+    std::string urgency = "normal";
+    std::string session;
+    std::optional<std::string> window;
+    std::string source = "claude";
 
     std::string backend = "auto";
     bool mock_render = false;
@@ -109,6 +117,39 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
     flag->add_option("name", x.a, "gamemode or locked")->required();
     flag->add_option("state", x.b, "on or off")->required()->check(on_off);
     sends(flag, [&x] { return req::Flag{x.a, x.b == "on"}; });
+
+    // swaync passes its urgency capitalised (`Low`, `Normal`, `Critical`); the request carries the
+    // canonical lowercase name, and a bad value is a usage error.
+    const CLI::Validator urgency_name(
+        [](std::string &value) {
+            const auto urgency = urgency_from_name(value);
+            if (!urgency) {
+                return std::string("must be low, normal or critical");
+            }
+            value = std::string(name(*urgency));
+            return std::string();
+        },
+        "low|normal|critical");
+
+    auto *notify = app->add_subcommand(
+        "notify", "Report a desktop notification so the keyboard can flash (used by swaync)");
+    notify->add_option("--app", x.app, "The sending app's name");
+    notify->add_option("--desktop-entry", x.desktop_entry, "The sending app's desktop file id");
+    notify->add_option("--urgency", x.urgency, "low, normal or critical (any case)")
+        ->transform(urgency_name)
+        ->capture_default_str();
+    sends(notify, [&x] { return req::Notify{x.app, x.desktop_entry, x.urgency}; });
+
+    auto *agent = app->add_subcommand(
+        "agent", "Report what a Claude Code session is doing (used by its hook script)");
+    agent->add_option("state", x.a, "waiting, working, done or end")
+        ->required()
+        ->check(CLI::IsMember({"waiting", "working", "done", "end"}));
+    agent->add_option("--session", x.session, "The session's id")->required();
+    agent->add_option("--window", x.window, "The Hyprland address of the session's terminal");
+    agent->add_option("--source", x.source, "Which tool reports this session")
+        ->capture_default_str();
+    sends(agent, [&x] { return req::Agent{x.a, x.session, x.window, x.source}; });
 
     sends(app->add_subcommand("reload", "Re-read the config file"), [] { return req::Reload{}; });
 

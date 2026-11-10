@@ -1,5 +1,7 @@
 #include "ipc/protocol.hpp"
 
+#include "util/strings.hpp"
+
 #include <format>
 #include <nlohmann/json.hpp>
 
@@ -24,6 +26,22 @@ template <class T> std::optional<T> opt_get(const ojson &j, const char *key) {
         return std::nullopt;
     }
     return j.at(key).get<T>();
+}
+
+/// R8: a window address is lowercase hex without the `0x` that `hyprctl clients -j` prints. An
+/// empty address (`""` or a bare `0x`) names no window.
+std::optional<std::string> normalized_window(const std::optional<std::string> &window) {
+    if (!window) {
+        return std::nullopt;
+    }
+    std::string address = to_lower(*window);
+    if (address.starts_with("0x")) {
+        address.erase(0, 2);
+    }
+    if (address.empty()) {
+        return std::nullopt;
+    }
+    return address;
 }
 
 std::string_view power_name(req::PowerAction a) {
@@ -163,6 +181,14 @@ Request request_from(const ojson &j) {
     if (cmd == "subscribe") {
         return req::Subscribe{};
     }
+    if (cmd == "notify") {
+        return req::Notify{j.at("app").get<std::string>(), j.at("desktop-entry").get<std::string>(),
+                           j.at("urgency").get<std::string>()};
+    }
+    if (cmd == "agent") {
+        return req::Agent{j.at("state").get<std::string>(), j.at("session").get<std::string>(),
+                          opt_get<std::string>(j, "window"), j.at("source").get<std::string>()};
+    }
     throw std::invalid_argument(std::format("unknown command \"{}\"", cmd));
 }
 
@@ -191,6 +217,19 @@ std::string encode(const Request &r) {
         }
         ojson operator()(const req::Reload &) const { return {{"cmd", "reload"}}; }
         ojson operator()(const req::Subscribe &) const { return {{"cmd", "subscribe"}}; }
+        ojson operator()(const req::Notify &v) const {
+            return {{"cmd", "notify"},
+                    {"app", v.app},
+                    {"desktop-entry", v.desktop_entry},
+                    {"urgency", v.urgency}};
+        }
+        ojson operator()(const req::Agent &v) const {
+            return {{"cmd", "agent"},
+                    {"state", v.state},
+                    {"session", v.session},
+                    {"window", opt_json(v.window)},
+                    {"source", v.source}};
+        }
     };
     return text(std::visit(Visitor{}, r));
 }
@@ -201,6 +240,37 @@ std::expected<Request, std::string> decode_request(std::string_view line) {
     } catch (const std::exception &e) {
         return std::unexpected(std::format("bad request: {}", e.what()));
     }
+}
+
+std::optional<std::expected<Signal, std::string>> to_signal(const Request &r) {
+    using Result = std::expected<Signal, std::string>;
+    if (const auto *n = std::get_if<req::Notify>(&r)) {
+        const auto urgency = urgency_from_name(n->urgency);
+        if (!urgency) {
+            return Result(
+                std::unexpect,
+                std::format("unknown urgency \"{}\" (low, normal or critical)", n->urgency));
+        }
+        return Result(signal::Notified{n->app, n->desktop_entry, *urgency});
+    }
+    if (const auto *a = std::get_if<req::Agent>(&r)) {
+        if (a->state == "waiting") {
+            return Result(signal::AgentWaiting{a->session, normalized_window(a->window)});
+        }
+        if (a->state == "working") {
+            return Result(signal::AgentWorking{a->session});
+        }
+        if (a->state == "done") {
+            return Result(signal::AgentDone{a->session, normalized_window(a->window)});
+        }
+        if (a->state == "end") {
+            return Result(signal::AgentEnded{a->session});
+        }
+        return Result(
+            std::unexpect,
+            std::format("unknown agent state \"{}\" (waiting, working, done or end)", a->state));
+    }
+    return std::nullopt;
 }
 
 std::string encode_status(const Status &s, int indent) { return text(status_json(s), indent); }
