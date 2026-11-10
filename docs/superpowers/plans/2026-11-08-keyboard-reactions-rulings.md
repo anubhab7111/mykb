@@ -113,3 +113,13 @@ rulings R1 to R13 are in the plan; P1 to P25 below were made during execution. E
 
 - Final fix B: minor (deferred, re-reviewer): tests/test_cli.cpp ~420-423 the exit_code_of calls are not guarded by the preceding parse assertion, so if the validator regressed the test would reach the real daemon socket (same pattern as the existing notify --urgency test; make the parse checks ASSERT or skip exit_code_of when parse succeeded); no test raises an Urgent key for the window of an evicted Agent key to show it is no longer absorbed (structurally guaranteed).
 
+
+## Closed after the live checks (2026-11-11)
+
+- The empty `SWAYNC_URGENCY` case from the Task 12 and Final deferred minors is fixed in commit
+  `ff2ecbc`: `notify-reaction.sh` now passes `"${SWAYNC_URGENCY:-normal}"`, with
+  `AgentHook.NotifySnippetFallsBackToNormalWhenSwayncLeavesTheUrgencyEmpty` (RED, then GREEN).
+- Spec §2's claim that the terminal's urgent signal "usually arrives first" on a Claude permission
+  prompt is corrected: the live run cost 3 writes, so no urgent signal came (Ruling P7 still covers a
+  terminal that does ring its bell). The README "enabled = false" wording and the other minors above
+  stay open.
