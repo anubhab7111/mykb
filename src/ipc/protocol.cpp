@@ -251,6 +251,17 @@ std::optional<std::expected<Signal, std::string>> to_signal(const Request &r) {
         return Result(signal::Notified{n->app, n->desktop_entry, *urgency});
     }
     if (const auto *a = std::get_if<req::Agent>(&r)) {
+        if (a->state != "waiting" && a->state != "working" && a->state != "done" &&
+            a->state != "end") {
+            return Result(std::unexpect,
+                          std::format("unknown agent state \"{}\" (waiting, working, done or end)",
+                                      a->state));
+        }
+        // The session is the lamp's key, and a key lives for an hour: keep it small and non-empty.
+        if (a->session.empty() || a->session.size() > kMaxSessionBytes) {
+            return Result(std::unexpect, std::format("session id must be 1 to {} bytes, got {}",
+                                                     kMaxSessionBytes, a->session.size()));
+        }
         if (a->state == "waiting") {
             return Result(signal::AgentWaiting{a->session, normalized_window(a->window)});
         }
@@ -260,12 +271,7 @@ std::optional<std::expected<Signal, std::string>> to_signal(const Request &r) {
         if (a->state == "done") {
             return Result(signal::AgentDone{a->session, normalized_window(a->window)});
         }
-        if (a->state == "end") {
-            return Result(signal::AgentEnded{a->session});
-        }
-        return Result(
-            std::unexpect,
-            std::format("unknown agent state \"{}\" (waiting, working, done or end)", a->state));
+        return Result(signal::AgentEnded{a->session});
     }
     return std::nullopt;
 }

@@ -14,6 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <memory>
 #include <print>
 #include <thread>
@@ -140,12 +141,25 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
         ->capture_default_str();
     sends(notify, [&x] { return req::Notify{x.app, x.desktop_entry, x.urgency}; });
 
+    // The daemon refuses an empty or oversized session id (it is the lamp's key); say so here, as a
+    // usage error, with the same bound.
+    const std::string session_bytes = std::format("1 to {} bytes", kMaxSessionBytes);
+    const CLI::Validator session_id(
+        [session_bytes](const std::string &value) {
+            return value.empty() || value.size() > kMaxSessionBytes
+                       ? "must be " + session_bytes + ", got " + std::to_string(value.size())
+                       : std::string();
+        },
+        session_bytes);
+
     auto *agent = app->add_subcommand(
         "agent", "Report what a Claude Code session is doing (used by its hook script)");
     agent->add_option("state", x.a, "waiting, working, done or end")
         ->required()
         ->check(CLI::IsMember({"waiting", "working", "done", "end"}));
-    agent->add_option("--session", x.session, "The session's id")->required();
+    agent->add_option("--session", x.session, "The session's id, " + session_bytes)
+        ->required()
+        ->check(session_id);
     agent->add_option("--window", x.window, "The Hyprland address of the session's terminal");
     agent->add_option("--source", x.source, "Which tool reports this session")
         ->capture_default_str();

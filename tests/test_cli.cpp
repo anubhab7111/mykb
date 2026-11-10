@@ -259,6 +259,31 @@ TEST(Cli, AgentRequiresSessionAndAValidState) {
     EXPECT_EQ(exit_code_of({"agent", "--session", "s1"}, &text), 64);
 }
 
+TEST(Cli, AgentRejectsEmptyAndOverlongSessionWithUsage64) {
+    const std::string longest(kMaxSessionBytes, 'a');
+    const std::string too_long(kMaxSessionBytes + 1, 'a');
+    for (const std::string &bad : {std::string(), too_long}) {
+        const auto [r, err] = parse({"agent", "waiting", "--session", bad.c_str()});
+        EXPECT_FALSE(r.has_value()) << bad.size() << " bytes";
+        EXPECT_NE(err.find("--session"), std::string::npos) << err;
+        EXPECT_NE(err.find("128"), std::string::npos) << err;
+    }
+    std::string text;
+    EXPECT_EQ(exit_code_of({"agent", "waiting", "--session", ""}, &text), 64);
+    EXPECT_NE(text.find("--session"), std::string::npos) << text;
+    EXPECT_EQ(exit_code_of({"agent", "end", "--session", too_long}, &text), 64);
+    EXPECT_NE(text.find("--session"), std::string::npos) << text;
+
+    // Exactly the limit is fine, for every state.
+    for (const char *state : {"waiting", "working", "done", "end"}) {
+        EXPECT_EQ(parse({"agent", state, "--session", longest.c_str()}).first,
+                  (Request{req::Agent{state, longest, std::nullopt, "claude"}}))
+            << state;
+    }
+    EXPECT_EQ(parse({"agent", "waiting", "--session", "x"}).first,
+              (Request{req::Agent{"waiting", "x", std::nullopt, "claude"}}));
+}
+
 TEST(Cli, AgentParsesWindowAndSource) {
     EXPECT_EQ(
         parse({"agent", "waiting", "--session", "s1", "--window", "0xABC", "--source", "other"})

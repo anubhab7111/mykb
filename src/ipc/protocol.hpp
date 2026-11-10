@@ -7,6 +7,7 @@
 #include "core/signals.hpp"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -16,6 +17,11 @@
 #include <vector>
 
 namespace omenkbd {
+
+/// The longest session id, in bytes, that an `agent` request may carry (the shortest is 1). The
+/// daemon keys a lamp on it and keeps the key for an hour, so it is bounded; the Claude hook's own
+/// limit of 128 characters fits. The CLI checks the same bound.
+inline constexpr std::size_t kMaxSessionBytes = 128;
 
 namespace req {
 struct Status {
@@ -127,7 +133,8 @@ std::string encode(const Request &r);
 std::expected<Request, std::string> decode_request(std::string_view line);
 
 /// The signal a `notify` or `agent` request reports, nullopt for every other request, and an error
-/// for an unknown urgency or state. The urgency is case-insensitive. The window is normalized (R8:
+/// for an unknown urgency or state, and for an `agent` session id that is empty or longer than
+/// `kMaxSessionBytes`. The urgency is case-insensitive. The window is normalized (R8:
 /// lowercase hex, no `0x`), and an empty one (`""` or `0x`) becomes nullopt so that no key is ever
 /// linked to an empty address. `working` and `end` carry no window.
 std::optional<std::expected<Signal, std::string>> to_signal(const Request &r);

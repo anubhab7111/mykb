@@ -228,6 +228,49 @@ TEST(Ipc, ToSignalRejectsABadStateOrUrgency) {
     EXPECT_FALSE(signal_error_of(notify_request("")).empty());
 }
 
+TEST(Ipc, ToSignalRejectsEmptyAndOverlongSessionIds) {
+    const auto request = [](const char *state, std::string session) {
+        return Request{req::Agent{state, std::move(session), std::nullopt, "claude"}};
+    };
+    static_assert(kMaxSessionBytes == 128);
+    const std::string longest(kMaxSessionBytes, 'a');
+    const std::string too_long(kMaxSessionBytes + 1, 'a');
+    // Two-byte characters: 64 of them are exactly 128 bytes, 65 are 65 characters but 130 bytes.
+    const auto accents = [](int n) {
+        std::string s;
+        for (int i = 0; i < n; ++i) {
+            s += "\xC3\xA9";
+        }
+        return s;
+    };
+    const std::string wide_ok = accents(64);
+    const std::string wide_too_long = accents(65);
+
+    for (const char *state : {"waiting", "working", "done", "end"}) {
+        const std::string empty_error = signal_error_of(request(state, ""));
+        EXPECT_NE(empty_error.find("session"), std::string::npos) << state << ": " << empty_error;
+        EXPECT_NE(empty_error.find("128"), std::string::npos) << state << ": " << empty_error;
+        const std::string long_error = signal_error_of(request(state, too_long));
+        EXPECT_NE(long_error.find("session"), std::string::npos) << state << ": " << long_error;
+        EXPECT_FALSE(signal_error_of(request(state, wide_too_long)).empty()) << state;
+
+        EXPECT_TRUE(signal_of(request(state, longest)).has_value()) << state;
+        EXPECT_TRUE(signal_of(request(state, "s")).has_value()) << state;
+        EXPECT_TRUE(signal_of(request(state, wide_ok)).has_value()) << state;
+    }
+    EXPECT_EQ(signal_of(request("end", longest)), (Signal{signal::AgentEnded{longest}}));
+    EXPECT_EQ(signal_of(request("waiting", longest)),
+              (Signal{signal::AgentWaiting{longest, std::nullopt}}));
+
+    // An unknown state keeps its own error, whatever the session is.
+    EXPECT_NE(signal_error_of(request("sleeping", "")).find("sleeping"), std::string::npos);
+
+    // Other requests carry no session: the limit does not touch them.
+    EXPECT_EQ(signal_of(req::Notify{"", "", "normal"}),
+              (Signal{signal::Notified{"", "", Urgency::Normal}}));
+    EXPECT_FALSE(to_signal(req::Status{}).has_value());
+}
+
 TEST(Ipc, ToSignalIsNulloptForRequestsThatAreNotSignals) {
     EXPECT_FALSE(to_signal(req::Status{}).has_value());
     EXPECT_FALSE(to_signal(req::Subscribe{}).has_value());
