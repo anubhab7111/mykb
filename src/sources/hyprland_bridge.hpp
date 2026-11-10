@@ -1,13 +1,17 @@
 #pragma once
-// Hyprland on the loop, as the daemon sees it: the socket2 source feeds the tracker, and what the
-// tracker says is delivered as events. The one thing `run_daemon` wires for Hyprland.
+// Hyprland on the loop, as the daemon sees it: the socket2 source feeds the tracker, what the
+// tracker says is delivered as events, and a request to look at fullscreen again is answered by an
+// async query to the request socket. The one thing `run_daemon` wires for Hyprland.
 
 #include "daemon/event_loop.hpp"
 #include "daemon/events.hpp"
+#include "sources/hyprctl_query.hpp"
 #include "sources/hyprland.hpp"
 #include "sources/hyprland_tracker.hpp"
 
 #include <functional>
+#include <optional>
+#include <string>
 
 namespace omenkbd {
 
@@ -15,24 +19,43 @@ class HyprlandBridge {
   public:
     using Emit = std::function<void(const Event &)>;
 
-    /// Connects at once (see HyprlandSource), with reactions off until `configure` says otherwise.
+    /// Connects at once (see HyprlandSource), with reactions and the fullscreen fact off until
+    /// `configure` says otherwise.
     HyprlandBridge(EventLoop &loop, HyprlandSource::PathFn path_fn, Emit emit);
     HyprlandBridge(const HyprlandBridge &) = delete;
     HyprlandBridge &operator=(const HyprlandBridge &) = delete;
 
     /// Signals (workspace, windows, urgency, focus) are forwarded only while `reactions_on`. The
     /// fullscreen fact and the submap always are. The tracker follows Hyprland either way, so a
-    /// switch takes effect at once. Loop thread only.
-    void configure(bool reactions_on);
+    /// switch takes effect at once.
+    ///
+    /// While `fullscreen_wanted`, each request to look at fullscreen starts a query to the request
+    /// socket next to the connected socket2, and the fact follows the answer. A failed query keeps
+    /// the last value. Turning it on while connected asks once at once (the check that came with
+    /// the connection found nobody wanting it); turning it off clears the fact (once) and drops any
+    /// query. Loop thread only.
+    void configure(bool reactions_on, bool fullscreen_wanted);
 
   private:
     void on_hypr(const HyprEvent &ev);
+    void deliver(const Signal &s);
+    void deliver(const FactUpdate &f);
+    void deliver(const event::Submap &m);
+    void deliver(const CheckFullscreen &check);
+    void check_fullscreen();
+    void on_query_result(const std::optional<ActiveWindowInfo> &info);
+    /// Sends the fact if it differs from the last one sent.
+    void set_fullscreen(std::optional<std::string> app);
 
     // `source_` comes last: it connects in its constructor and may call `on_hypr` before the
     // constructor returns, so everything `on_hypr` uses must already exist.
     Emit emit_;
     HyprlandTracker tracker_;
+    HyprctlQuery query_;
     bool reactions_on_ = false;
+    bool fullscreen_wanted_ = false;
+    /// The last `FullscreenApp` sent, whoever it came from. Starts as the model starts: nothing.
+    std::optional<std::string> fullscreen_;
     HyprlandSource source_;
 };
 

@@ -1,6 +1,7 @@
 // Event sources in real time: Hyprland socket2 (fake listener), theme symlink watcher (temp
 // tree), hwmon (fake sysfs), system D-Bus (a private dbus-daemon with a fake logind).
 
+#include "fake_hyprland.hpp"
 #include "helpers.hpp"
 
 #include "ipc/socket.hpp"
@@ -17,6 +18,7 @@
 #include <atomic>
 #include <csignal>
 #include <expected>
+#include <format>
 #include <memory>
 #include <mutex>
 #include <poll.h>
@@ -56,22 +58,6 @@ template <class T> class Collector {
 
 using Events = Collector<Event>;
 using HyprEvents = Collector<HyprEvent>;
-
-/// Runs a loop on its own thread until destroyed.
-class LoopThread {
-  public:
-    explicit LoopThread(EventLoop &loop) : loop_(loop), t_([&loop] { loop.run(); }) {}
-    ~LoopThread() {
-        loop_.stop();
-        t_.join();
-    }
-    LoopThread(const LoopThread &) = delete;
-    LoopThread &operator=(const LoopThread &) = delete;
-
-  private:
-    EventLoop &loop_;
-    std::thread t_;
-};
 
 /// Sets (or, with nullopt, unsets) an environment variable until destroyed.
 class ScopedEnv {
@@ -326,11 +312,12 @@ void send(const UniqueFd &conn, const std::string &lines) {
     ASSERT_EQ(::write(conn.get(), lines.data(), lines.size()), static_cast<ssize_t>(lines.size()));
 }
 
-/// Calls `bridge.configure(reactions_on)` on the loop thread and waits until it ran.
-void configure_on_loop(EventLoop &loop, HyprlandBridge &bridge, bool reactions_on) {
+/// Calls `bridge.configure(...)` on the loop thread and waits until it ran.
+void configure_on_loop(EventLoop &loop, HyprlandBridge &bridge, bool reactions_on,
+                       bool fullscreen_wanted) {
     auto done = std::make_shared<std::atomic<bool>>(false);
-    loop.post([&bridge, reactions_on, done] {
-        bridge.configure(reactions_on);
+    loop.post([&bridge, reactions_on, fullscreen_wanted, done] {
+        bridge.configure(reactions_on, fullscreen_wanted);
         *done = true;
     });
     ASSERT_TRUE(wait_until([done] { return done->load(); }, 2000ms));
@@ -340,15 +327,30 @@ template <class S> Event sig(S s) { return Event{Signal{std::move(s)}}; }
 
 Event fullscreen_cleared() { return Event{FactUpdate{fact::FullscreenApp{std::nullopt}}}; }
 
-/// A fake Hyprland: a listener the bridge connects to.
+Event fullscreen_is(std::string app) {
+    return Event{FactUpdate{fact::FullscreenApp{std::move(app)}}};
+}
+
+/// What `j/activewindow` says for a window of class `app_class` in Hyprland's `mode` (0 none,
+/// 1 maximized, 2 fullscreen), with a title the daemon must never see.
+std::string window_json(std::string_view app_class, int mode) {
+    return std::format(
+        R"({{"address":"0xab","class":"{}","title":"a private title","fullscreen":{}}})", app_class,
+        mode);
+}
+
+/// A fake Hyprland: a listener the bridge connects to (socket2), and, once `serve_requests` is
+/// called, the request socket next to it (`.socket.sock`) that answers the fullscreen query.
 struct FakeHyprland {
     TempDir dir;
     fs::path path = dir.path() / ".socket2.sock";
     std::expected<UniqueFd, IpcError> listener = bind_socket(path);
+    std::optional<FakeRequestServer> requests;
 
     [[nodiscard]] HyprlandSource::PathFn paths() const {
         return [p = path] { return std::vector{p}; };
     }
+    FakeRequestServer &serve_requests() { return requests.emplace(dir.path() / ".socket.sock"); }
 };
 
 } // namespace
@@ -368,14 +370,14 @@ TEST(HyprlandBridge, ForwardsSignalsOnlyWhileReactionsAreOn) {
     ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
     EXPECT_EQ(events.get(), (std::vector<Event>{event::Submap{"resize"}}));
 
-    configure_on_loop(loop, bridge, true);
+    configure_on_loop(loop, bridge, true, false);
     send(conn, "openwindow>>abc,1,Alacritty,t\nurgent>>def\nclosewindow>>abc\n");
     ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
     EXPECT_EQ(events.get(),
               (std::vector<Event>{event::Submap{"resize"}, sig(signal::WindowOpened{}),
                                   sig(signal::UrgentRaised{"def"}), sig(signal::WindowClosed{})}));
 
-    configure_on_loop(loop, bridge, false);
+    configure_on_loop(loop, bridge, false, false);
     send(conn, "closewindow>>def\nsubmap>>\n");
     ASSERT_TRUE(wait_until([&] { return events.size() >= 5; }, 2000ms));
     EXPECT_EQ(events.get().back(), Event{event::Submap{std::nullopt}});
@@ -391,7 +393,7 @@ TEST(HyprlandBridge, ARealFocusSequenceBecomesOneSignalPerChange) {
     EventLoop loop;
     Events events;
     HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
-    bridge.configure(true); // the loop is not running yet
+    bridge.configure(true, false); // the loop is not running yet
     LoopThread running(loop);
     UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
     ASSERT_TRUE(conn);
@@ -445,7 +447,7 @@ TEST(HyprlandBridge, DisconnectResetsUrgentWhileReactionsAreOn) {
     EventLoop loop;
     Events events;
     HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
-    bridge.configure(true); // the loop is not running yet
+    bridge.configure(true, false); // the loop is not running yet
     LoopThread running(loop);
 
     UniqueFd first = accept_within(hypr_sock.listener->get(), 2000ms);
@@ -457,6 +459,279 @@ TEST(HyprlandBridge, DisconnectResetsUrgentWhileReactionsAreOn) {
     EXPECT_EQ(events.get(),
               (std::vector<Event>{sig(signal::UrgentRaised{"abc"}), sig(signal::UrgentReset{}),
                                   fullscreen_cleared(), event::Submap{std::nullopt}}));
+}
+
+// The fullscreen fact: socket2 says when to look, the request socket says what is there. The fact
+// is delivered whether or not reactions are on, so these run with them off.
+TEST(HyprlandBridge, FullscreenFactFollowsTheFocusedWindow) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.reply_with(window_json("Firefox", 0));
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    bridge.configure(false, true); // the loop is not running yet
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+    ASSERT_TRUE(requests.wait_for_requests(1)) << "the state is read at start";
+    EXPECT_EQ(events.size(), 0u) << "a window that is not fullscreen is no news";
+
+    // mpv gets the focus while fullscreen: the focus change and the fullscreen event are one query.
+    requests.reply_with(window_json("MPV", 2));
+    send(conn, "activewindow>>MPV,movie\nactivewindowv2>>0xAB\nfullscreen>>1\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_is("mpv")}))
+        << "the class is lowercased";
+    EXPECT_EQ(requests.connections(), 2) << "one query for the burst";
+    EXPECT_EQ(requests.requests().back(), "j/activewindow");
+
+    // The same answer again is a query but not news.
+    send(conn, "fullscreen>>1\n");
+    ASSERT_TRUE(requests.wait_for_requests(3));
+    std::this_thread::sleep_for(150ms);
+    EXPECT_EQ(events.size(), 1u) << "identical replies emit once";
+
+    requests.reply_with(window_json("MPV", 0));
+    send(conn, "fullscreen>>0\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    EXPECT_EQ(events.get().back(), fullscreen_cleared());
+
+    // Maximized (1) is not fullscreen; maximized and fullscreen (3) is.
+    requests.reply_with(window_json("Firefox", 1));
+    send(conn, "activewindow>>Firefox,page\nactivewindowv2>>cd\n");
+    ASSERT_TRUE(requests.wait_for_requests(5));
+    std::this_thread::sleep_for(150ms);
+    EXPECT_EQ(events.size(), 2u) << "maximized is not fullscreen";
+    requests.reply_with(window_json("Firefox", 3));
+    send(conn, "fullscreen>>1\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
+    EXPECT_EQ(events.get().back(), fullscreen_is("firefox"));
+
+    // The window closes and nothing is focused: Hyprland answers `{}`, and that is an answer.
+    requests.reply_with("{}");
+    send(conn, "closewindow>>cd\nactivewindowv2>>\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
+    EXPECT_EQ(events.get().back(), fullscreen_cleared());
+}
+
+TEST(HyprlandBridge, KeepsTheLastFullscreenValueWhenTheQueryFails) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.reply_with(window_json("mpv", 2));
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    bridge.configure(false, true);
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    ASSERT_EQ(events.get(), (std::vector<Event>{fullscreen_is("mpv")}));
+
+    requests.reply_with("Invalid"); // an unusable reply
+    send(conn, "fullscreen>>1\n");
+    ASSERT_TRUE(requests.wait_for_requests(2));
+    std::this_thread::sleep_for(150ms);
+    EXPECT_EQ(events.size(), 1u);
+
+    requests.stay_silent(); // no reply at all: the query times out after 300 ms
+    send(conn, "fullscreen>>1\n");
+    ASSERT_TRUE(requests.wait_for_requests(3));
+    ASSERT_TRUE(wait_until([&] { return requests.closed_by_client() >= 1; }, 2000ms))
+        << "the query gave up and closed its connection";
+    std::this_thread::sleep_for(150ms);
+    EXPECT_EQ(events.size(), 1u) << "a failure is not 'not fullscreen'";
+
+    requests.reply_with(window_json("mpv", 0)); // the fact was kept, so this is news
+    send(conn, "fullscreen>>0\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    EXPECT_EQ(events.get().back(), fullscreen_cleared());
+}
+
+TEST(HyprlandBridge, NoQueriesWhenFullscreenIsNotWanted) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.reply_with(window_json("mpv", 2));
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    bridge.configure(true, false); // the loop is not running yet
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+
+    send(conn, "workspacev2>>1,1\nworkspacev2>>2,2\nactivewindow>>mpv,x\nactivewindowv2>>ab\n"
+               "fullscreen>>1\nclosewindow>>ab\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms)) << "the lines were read";
+    std::this_thread::sleep_for(450ms); // past the debounce and the timeout
+    EXPECT_EQ(requests.connections(), 0) << "no connection to the request socket";
+    EXPECT_EQ(events.size(), 3u) << "and no fullscreen fact";
+}
+
+TEST(HyprlandBridge, ConnectSeedsTheFullscreenState) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.reply_with(window_json("Firefox", 0));
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    bridge.configure(false, true); // the loop is not running yet
+    LoopThread running(loop);
+    UniqueFd first = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(requests.wait_for_requests(1));
+
+    first.reset(); // Hyprland restarts, with mpv fullscreen when it comes back
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    requests.reply_with(window_json("MPV", 2));
+    UniqueFd second = accept_within(hypr_sock.listener->get(), 3000ms);
+    ASSERT_TRUE(second) << "reconnects within 3 s";
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_cleared(), event::Submap{std::nullopt},
+                                                fullscreen_is("mpv")}));
+    EXPECT_EQ(requests.connections(), 2) << "Connected asks once";
+}
+
+// The tracker clears the fact when Hyprland goes away; the bridge must remember that it did, or a
+// fullscreen app that is still fullscreen after the restart would look like no change.
+TEST(HyprlandBridge, AFullscreenAppStillFullscreenAfterARestartIsReportedAgain) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.reply_with(window_json("mpv", 2));
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    bridge.configure(false, true); // the loop is not running yet
+    LoopThread running(loop);
+    UniqueFd first = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+
+    first.reset(); // Hyprland restarts; mpv is still fullscreen when it is back
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
+    UniqueFd second = accept_within(hypr_sock.listener->get(), 3000ms);
+    ASSERT_TRUE(second) << "reconnects within 3 s";
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
+    EXPECT_EQ(events.get(),
+              (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared(),
+                                  event::Submap{std::nullopt}, fullscreen_is("mpv")}));
+}
+
+// Ruling P21: the source connects inside the bridge's constructor, before the first `configure`,
+// so the check that comes with `Connected` finds nobody wanting it. Turning the fact on while
+// connected must ask by itself.
+TEST(HyprlandBridge, ConfigureEnablingFullscreenWhileConnectedSeedsTheState) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.reply_with(window_json("MPV", 2));
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+    std::this_thread::sleep_for(250ms);
+    EXPECT_EQ(requests.connections(), 0) << "nobody wanted the fact when Hyprland connected";
+
+    configure_on_loop(loop, bridge, false, true);
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_is("mpv")}));
+    EXPECT_EQ(requests.connections(), 1);
+
+    configure_on_loop(loop, bridge, true, true); // a reload that leaves the fact wanted
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(requests.connections(), 1) << "only the change from off to on asks";
+    EXPECT_EQ(events.size(), 1u);
+}
+
+TEST(HyprlandBridge, TurningFullscreenOffClearsTheFactOnce) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.reply_with(window_json("Firefox", 0));
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+
+    configure_on_loop(loop, bridge, false, true);
+    ASSERT_TRUE(requests.wait_for_requests(1));
+    std::this_thread::sleep_for(100ms);
+    configure_on_loop(loop, bridge, false, false);
+    std::this_thread::sleep_for(100ms);
+    EXPECT_EQ(events.size(), 0u) << "the fact was already nothing: no news when it goes";
+
+    requests.reply_with(window_json("mpv", 2));
+    configure_on_loop(loop, bridge, false, true);
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    configure_on_loop(loop, bridge, false, false);
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared()}));
+
+    configure_on_loop(loop, bridge, false, false); // off again, and a reload with reactions on
+    configure_on_loop(loop, bridge, true, false);
+    std::this_thread::sleep_for(100ms);
+    EXPECT_EQ(events.size(), 2u) << "once";
+
+    configure_on_loop(loop, bridge, true, true); // and on again reads the state afresh
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
+    EXPECT_EQ(events.get().back(), fullscreen_is("mpv"));
+}
+
+TEST(HyprlandBridge, ALateReplyAfterTurningFullscreenOffIsIgnored) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.stay_silent();
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    bridge.configure(false, true);
+    bridge.configure(false, false); // before the loop runs: the query is still in its debounce
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+    std::this_thread::sleep_for(450ms);
+    EXPECT_EQ(requests.connections(), 0) << "a query waiting to start is dropped";
+
+    configure_on_loop(loop, bridge, false, true);
+    ASSERT_TRUE(requests.wait_for_requests(1)) << "this one is in flight";
+    configure_on_loop(loop, bridge, false, false);
+    requests.answer_held(window_json("mpv", 2));
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(events.size(), 0u) << "a reply that comes after the fact was turned off is dropped";
+}
+
+TEST(HyprlandBridge, ADisconnectDropsAQueryInFlight) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    requests.stay_silent();
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    bridge.configure(false, true);
+    LoopThread running(loop);
+    UniqueFd first = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(requests.wait_for_requests(1)) << "in flight";
+
+    first.reset();
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    EXPECT_EQ(events.get(),
+              (std::vector<Event>{fullscreen_cleared(), event::Submap{std::nullopt}}));
+    requests.answer_held(window_json("mpv", 2)); // from the Hyprland that is gone
+    std::this_thread::sleep_for(300ms);          // less than the 1 s before it reconnects
+    EXPECT_EQ(events.size(), 2u) << "the cleared fact stays cleared";
 }
 
 TEST(Theme, LinkChainFollowsRiceLayout) {

@@ -6,11 +6,8 @@
 #include <cerrno>
 #include <charconv>
 #include <cstdlib>
-#include <cstring>
 #include <functional>
 #include <sys/epoll.h>
-#include <sys/socket.h>
-#include <sys/un.h>
 #include <unistd.h>
 #include <utility>
 
@@ -22,22 +19,6 @@ using namespace std::chrono_literals;
 
 /// Hyprland lines carry window titles, so they can be long, but never this long.
 constexpr std::size_t kMaxLine = std::size_t{64} * 1024;
-
-/// A connected non-blocking socket, or an empty fd. A Unix-socket connect either completes at
-/// once or fails (ECONNREFUSED = nothing listens any more, EAGAIN = backlog full).
-UniqueFd connect_to(const std::filesystem::path &path) {
-    sockaddr_un addr{};
-    if (path.native().size() >= sizeof(addr.sun_path)) {
-        return UniqueFd();
-    }
-    addr.sun_family = AF_UNIX;
-    std::memcpy(addr.sun_path, path.c_str(), path.native().size());
-    UniqueFd fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0));
-    if (!fd || ::connect(fd.get(), reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0) {
-        return UniqueFd();
-    }
-    return fd;
-}
 
 /// The text before the first comma, or all of `s`. Later fields can hold a window title.
 std::string_view before_comma(std::string_view s) { return s.substr(0, s.find(',')); }
@@ -155,7 +136,7 @@ HyprlandSource::~HyprlandSource() {
 
 void HyprlandSource::connect() {
     for (const auto &path : path_fn_()) {
-        if (UniqueFd fd = connect_to(path)) {
+        if (UniqueFd fd = connect_nonblocking(path)) {
             failures_ = 0;
             fd_ = std::move(fd);
             connected_path_ = path;

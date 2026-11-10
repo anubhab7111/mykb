@@ -1,6 +1,7 @@
 #pragma once
 // The user-only Unix socket (`$XDG_RUNTIME_DIR/omen-kbd.sock`, mode 0600): server bind, line
-// framing, and the blocking client used by the CLI.
+// framing, and the blocking client used by the CLI. Also the non-blocking connect that the Hyprland
+// sources use.
 
 #include "ipc/protocol.hpp"
 #include "util/fd.hpp"
@@ -37,6 +38,11 @@ class LineBuffer {
   private:
     std::string buf_;
 };
+
+/// Connects to the Unix stream socket at `path`. The result is non-blocking and close-on-exec, or
+/// empty when nothing can be reached there (no such file, nobody listening, backlog full, path too
+/// long). A Unix-socket connect completes at once or fails, so there is no connect in progress.
+UniqueFd connect_nonblocking(const std::filesystem::path &path);
 
 /// Sends one request and waits (up to 5 s) for its response.
 std::expected<Response, IpcError> request(const std::filesystem::path &path, const Request &r);
