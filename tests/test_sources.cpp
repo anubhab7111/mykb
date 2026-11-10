@@ -461,6 +461,61 @@ TEST(HyprlandBridge, DisconnectResetsUrgentWhileReactionsAreOn) {
                                   fullscreen_cleared(), event::Submap{std::nullopt}}));
 }
 
+// P25: the tracker follows Hyprland while reactions are off, but the daemon hears no signal.
+// Without a replay, the focus would stay unknown after `[reactions]` goes on until the user focuses
+// another window (P15 ignores a repeat of the same one), and a window that was already urgent would
+// never light. Each switch from off to on says what the tracker holds, once.
+TEST(HyprlandBridge, TurningReactionsOnReplaysTheHeldFocusAndUrgentWindows) {
+    FakeHyprland hypr_sock;
+    ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
+    EventLoop loop;
+    Events events;
+    HyprlandBridge bridge(loop, hypr_sock.paths(), events.sink());
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+
+    // Reactions are off: the tracker learns the focus and an urgent window, the daemon hears
+    // nothing of it. The submap passes, and (lines are handled in order) marks the end.
+    send(conn, "activewindow>>kitty,Title\nactivewindowv2>>a1\nurgent>>b2\nsubmap>>resize\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{event::Submap{"resize"}}))
+        << "no signal while reactions are off";
+
+    // Off -> on: the held focus and urgent window are replayed, the focus first.
+    configure_on_loop(loop, bridge, true, false);
+    EXPECT_EQ(events.get(),
+              (std::vector<Event>{event::Submap{"resize"}, sig(signal::FocusChanged{"a1", "kitty"}),
+                                  sig(signal::UrgentRaised{"b2"})}));
+
+    // A reload that leaves reactions on says nothing again.
+    configure_on_loop(loop, bridge, true, false);
+    EXPECT_EQ(events.size(), 3u) << "only the change from off to on replays";
+
+    // Turning off says nothing either. The tracker keeps following Hyprland meanwhile.
+    configure_on_loop(loop, bridge, false, false);
+    EXPECT_EQ(events.size(), 3u);
+    send(conn, "urgent>>c3\nsubmap>>game\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
+    EXPECT_EQ(events.get().back(), Event{event::Submap{"game"}});
+    EXPECT_EQ(events.size(), 4u) << "no UrgentRaised while reactions are off";
+
+    // On again replays again, with what changed while it was off.
+    configure_on_loop(loop, bridge, true, false);
+    EXPECT_EQ(events.get(), (std::vector<Event>{
+                                event::Submap{"resize"}, sig(signal::FocusChanged{"a1", "kitty"}),
+                                sig(signal::UrgentRaised{"b2"}), event::Submap{"game"},
+                                sig(signal::FocusChanged{"a1", "kitty"}),
+                                sig(signal::UrgentRaised{"b2"}), sig(signal::UrgentRaised{"c3"})}));
+
+    // The replay did not disturb the tracker: a repeat of the focused window (a title change) is
+    // still ignored (P15). The submap that follows marks the end of what the bridge delivered.
+    send(conn, "activewindow>>kitty,A new title\nactivewindowv2>>a1\nsubmap>>\n");
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 8; }, 2000ms));
+    EXPECT_EQ(events.get().back(), Event{event::Submap{std::nullopt}});
+    EXPECT_EQ(events.size(), 8u) << "no second FocusChanged for the same window";
+}
+
 // The fullscreen fact: socket2 says when to look, the request socket says what is there. The fact
 // is delivered whether or not reactions are on, so these run with them off.
 TEST(HyprlandBridge, FullscreenFactFollowsTheFocusedWindow) {

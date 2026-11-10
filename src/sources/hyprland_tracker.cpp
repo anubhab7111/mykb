@@ -1,5 +1,7 @@
 #include "sources/hyprland_tracker.hpp"
 
+#include <algorithm>
+#include <string>
 #include <utility>
 
 namespace omenkbd {
@@ -14,6 +16,19 @@ template <class S> TrackerOut sig(S s) { return Signal{std::move(s)}; }
 
 std::vector<TrackerOut> HyprlandTracker::on(const HyprEvent &ev) {
     return std::visit([this](const auto &e) { return handle(e); }, ev);
+}
+
+std::vector<Signal> HyprlandTracker::replay() const {
+    std::vector<Signal> out;
+    if (focused_) {
+        out.emplace_back(signal::FocusChanged{*focused_, app_class_});
+    }
+    std::vector<std::string> urgent(urgent_.begin(), urgent_.end()); // sorted next: a stable order
+    std::ranges::sort(urgent);
+    for (std::string &window : urgent) {
+        out.emplace_back(signal::UrgentRaised{std::move(window)});
+    }
+    return out;
 }
 
 void HyprlandTracker::reset() {
