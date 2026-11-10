@@ -537,9 +537,18 @@ TEST(HyprlandBridge, KeepsTheLastFullscreenValueWhenTheQueryFails) {
     std::this_thread::sleep_for(150ms);
     EXPECT_EQ(events.size(), 1u);
 
-    requests.stay_silent(); // no reply at all: the query times out after 300 ms
+    // Ruling P23: Hyprland says `{}` when nothing is focused, so a reply of zero bytes is a hiccup.
+    // It must not un-dim the keyboard in the middle of a movie.
+    requests.reply_with("");
     send(conn, "fullscreen>>1\n");
     ASSERT_TRUE(requests.wait_for_requests(3));
+    std::this_thread::sleep_for(150ms);
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_is("mpv")}))
+        << "an empty reply keeps the last value";
+
+    requests.stay_silent(); // no reply at all: the query times out after 300 ms
+    send(conn, "fullscreen>>1\n");
+    ASSERT_TRUE(requests.wait_for_requests(4));
     ASSERT_TRUE(wait_until([&] { return requests.closed_by_client() >= 1; }, 2000ms))
         << "the query gave up and closed its connection";
     std::this_thread::sleep_for(150ms);

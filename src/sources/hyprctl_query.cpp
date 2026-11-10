@@ -2,7 +2,6 @@
 
 #include "core/window_address.hpp"
 #include "ipc/socket.hpp"
-#include "util/strings.hpp"
 
 #include <cerrno>
 #include <climits>
@@ -57,14 +56,11 @@ std::optional<ActiveWindowInfo> window_from(const json &doc) {
     return ActiveWindowInfo{std::move(normalized), *app_class, mode->get<int>()};
 }
 
-/// What a finished reply means: the window, `ActiveWindowInfo{}` for "nothing is focused" (`{}` or
-/// no text at all), nullopt for anything else.
+/// What a finished reply means: the window, `ActiveWindowInfo{}` for "nothing is focused" (Hyprland
+/// answers `{}`), nullopt for anything else. An empty reply is not "nothing focused", it is a
+/// hiccup (P23): it parses to nothing and so fails.
 std::optional<ActiveWindowInfo> interpret(std::string_view reply) {
-    const std::string_view text = trim(reply);
-    if (text.empty()) {
-        return ActiveWindowInfo{};
-    }
-    const json doc = json::parse(text, nullptr, false);
+    const json doc = json::parse(reply, nullptr, false);
     if (doc.is_object() && doc.empty()) {
         return ActiveWindowInfo{};
     }
