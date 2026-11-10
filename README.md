@@ -88,7 +88,7 @@ kill %2 %1
 | `doctor` | Read-only checks: driver and `readonly`, permissions, competing writers, hp-wmi DKMS packages, daemon, hooks, theme. |
 | `gen-hyprland` | Print the Hyprland hook (`kbdlight.lua`) for mode colors. |
 | `notify [--app TEXT] [--desktop-entry TEXT] [--urgency low\|normal\|critical]` | Report a desktop notification, for the notification flash. Used by `rice-notify-sound` (`notify-reaction.sh`). Urgency is case-insensitive. |
-| `agent <waiting\|working\|done\|end> --session ID [--window ADDR] [--source NAME]` | Report what a coding-agent session is doing, for the Claude lamp. Used by `omen-kbd-agent-hook`. `--window` is the Hyprland address of the session's terminal; `--source` defaults to `claude`. |
+| `agent <waiting\|working\|done\|end> --session ID [--window ADDR] [--source NAME]` | Report what a coding-agent session is doing, for the Claude lamp. Used by `omen-kbd-agent-hook`. `ID` is 1 to 128 bytes. `--window` is the Hyprland address of the session's terminal; `--source` defaults to `claude`. |
 | `daemon [--backend auto\|mock\|hp-omen-kbd\|mainline-led] [--mock-render] [--no-sources]` | Run the daemon. `auto` only picks a real backend. |
 
 Exit codes: `0` ok; `1` the daemon or the keyboard write reported an error (message on stderr), or
@@ -124,7 +124,8 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
   color. They never pulse, so a lamp that stays lit for hours writes nothing more.
 - **Bursts are bounded.** Workspace switches during a sweep are absorbed. Window pulses are limited
   to one per 500 ms. At most one flash waits in a queue. More windows or sessions asking for
-  attention while a lamp is lit cost 0. `max_per_minute` caps all the short reactions.
+  attention while a lamp is lit cost 0. `max_per_minute` caps all the short reactions. Each lamp
+  keeps at most 64 sessions or windows; a new one past that replaces the oldest.
 - **Silent cases cost 0 writes.** Reactions are off; the keyboard is dark (backlight off after the
   Fn key, brightness 0, lid closed, locked or idle with the gate set to `off`, suspended); or the
   hourly write budget is spent. The daemon cannot see the Fn key, so a reaction within 5 s of an Fn

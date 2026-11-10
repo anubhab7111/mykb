@@ -10,6 +10,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
@@ -21,6 +22,11 @@ namespace omenkbd {
 
 /// Agent outranks Urgent where their zones overlap.
 enum class LampKind { Agent, Urgent };
+
+/// The most keys one kind holds. A key lives for the kind's TTL (an hour for the agent lamp) and
+/// `LampSet::next_change` visits every key on every frame, so an unbounded producer would grow
+/// memory and per-frame work. Past the bound a new key evicts the kind's oldest one.
+inline constexpr std::size_t kMaxKeysPerKind = 64;
 
 /// "agent" or "urgent".
 std::string_view name(LampKind kind);
@@ -48,6 +54,10 @@ class LampSet {
     /// intro at `now` when `play_intro` is set; a kind already lit never does. Raising a key the
     /// kind already holds only refreshes its TTL. Ignored when the kind has no zones: it changes
     /// nothing.
+    ///
+    /// A kind holds at most `kMaxKeysPerKind` keys: a new key raised past that evicts the kind's
+    /// oldest one first (the smallest `raised_at`; on a tie the smallest key), with its window
+    /// link. The kind stays lit through it, so the intro and the paint do not change.
     ///
     /// A window shows one light, the `Agent` one:
     ///   - an `Urgent` raise is ignored when an `Agent` key already carries its `window`;
@@ -85,6 +95,9 @@ class LampSet {
 
     /// True when no kind holds a key.
     [[nodiscard]] bool empty() const;
+
+    /// How many keys `kind` holds; never more than `kMaxKeysPerKind`.
+    [[nodiscard]] std::size_t key_count(LampKind kind) const;
 
   private:
     struct Key {

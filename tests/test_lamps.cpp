@@ -1,6 +1,9 @@
 #include "core/lamps.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <format>
 #include <gtest/gtest.h>
 #include <initializer_list>
 #include <optional>
@@ -478,4 +481,134 @@ TEST(LampSet, RestyleKeepsKeys) {
     // The window link survived all of it.
     lamps.clear_window("w1");
     EXPECT_TRUE(lamps.empty());
+}
+
+namespace {
+
+/// "k00", "k01", ...: sorts in raise order, so the lexicographically smallest key is the first.
+std::string key_n(int n) { return std::format("k{:02}", n); }
+
+constexpr int kCap = static_cast<int>(kMaxKeysPerKind);
+
+} // namespace
+
+TEST(LampSet, KeysPerKindAreBoundedAndTheOldestIsEvicted) {
+    LampSet lamps = styled();
+    const LayerOps on = lit(kAgent, {Zone::Wasd});
+    constexpr int total = 70;
+    static_assert(total > kCap);
+
+    // The first key plays the intro; every later raise asks for one too, but the kind is lit.
+    for (int i = 0; i < total; ++i) {
+        const TimePoint now = t0 + std::chrono::seconds(i);
+        // The first key is linked to a window: its link has to go away with the key.
+        std::optional<std::string> window;
+        if (i == 0) {
+            window = "w0";
+        }
+        lamps.raise(LampKind::Agent, key_n(i), window, now, true);
+        EXPECT_EQ(lamps.key_count(LampKind::Agent),
+                  std::min(static_cast<std::size_t>(i) + 1, kMaxKeysPerKind))
+            << i;
+        if (i >= 1) {
+            // Past the intro of the first key, an insert or an eviction never replays it.
+            EXPECT_EQ(lamps.layer(now), on) << i;
+            EXPECT_EQ(lamps.layer(now + 150ms), on) << i;
+        }
+    }
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent}));
+
+    // The first six keys (the oldest) are gone: clearing one changes nothing.
+    for (int i = 0; i < total - kCap; ++i) {
+        lamps.clear(LampKind::Agent, key_n(i));
+        EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind) << key_n(i);
+    }
+    // The window link of an evicted key went with it.
+    lamps.clear_window("w0");
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+    EXPECT_EQ(lamps.layer(t0 + 2min), on) << "still lit";
+
+    // The newest key is present, and so is every survivor: clearing them empties the kind.
+    lamps.clear(LampKind::Agent, key_n(total - 1));
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind - 1);
+    for (int i = total - kCap; i < total - 1; ++i) {
+        EXPECT_EQ(lamps.layer(t0 + 2min), on) << "lit until the last key goes";
+        lamps.clear(LampKind::Agent, key_n(i));
+    }
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), 0U);
+    EXPECT_TRUE(lamps.empty());
+    EXPECT_TRUE(empty(lamps.layer(t0 + 2min)));
+}
+
+TEST(LampSet, TheBoundHoldsIndependentlyForUrgent) {
+    LampSet lamps = styled();
+    constexpr int total = 70;
+
+    lamps.raise(LampKind::Agent, "a1", std::nullopt, t0, false);
+    for (int i = 0; i < total; ++i) {
+        lamps.raise(LampKind::Urgent, key_n(i), std::nullopt, t0 + std::chrono::seconds(i), false);
+    }
+    EXPECT_EQ(lamps.key_count(LampKind::Urgent), kMaxKeysPerKind);
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), 1U) << "the urgent flood evicts no agent key";
+
+    for (int i = 0; i < total - kCap; ++i) {
+        lamps.clear(LampKind::Urgent, key_n(i));
+        EXPECT_EQ(lamps.key_count(LampKind::Urgent), kMaxKeysPerKind) << key_n(i);
+    }
+    lamps.clear(LampKind::Urgent, key_n(total - 1));
+    EXPECT_EQ(lamps.key_count(LampKind::Urgent), kMaxKeysPerKind - 1);
+
+    // A flood of agent keys is bounded on its own and evicts no urgent key.
+    for (int i = 0; i < total; ++i) {
+        lamps.raise(LampKind::Agent, key_n(i), std::nullopt, t0 + std::chrono::seconds(i), false);
+    }
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+    EXPECT_EQ(lamps.key_count(LampKind::Urgent), kMaxKeysPerKind - 1);
+    lamps.clear_kind(LampKind::Agent);
+    EXPECT_EQ(lamps.layer(t0 + 1min), lit(kUrgent, {Zone::Left, Zone::Middle, Zone::Right}));
+}
+
+TEST(LampSet, ReRaisingAnExistingKeyAtTheCapEvictsNothing) {
+    LampSet lamps = styled();
+    for (int i = 0; i < kCap; ++i) {
+        lamps.raise(LampKind::Agent, key_n(i), std::nullopt, t0 + std::chrono::seconds(i), false);
+    }
+    ASSERT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+
+    // The oldest key is raised again: it only refreshes, so every key is still there.
+    const TimePoint later = t0 + 10min;
+    lamps.raise(LampKind::Agent, key_n(0), std::nullopt, later, true);
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+    EXPECT_EQ(lamps.next_change(later), t0 + 1s + 1h) << "k01 is the oldest now";
+
+    // The refreshed key is the newest now, so the next new key evicts k01, not k00.
+    lamps.raise(LampKind::Agent, "new", std::nullopt, later + 1s, false);
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+    lamps.clear(LampKind::Agent, key_n(1));
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind) << "k01 was evicted";
+    lamps.clear(LampKind::Agent, key_n(0));
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind - 1) << "k00 survived";
+}
+
+TEST(LampSet, EvictionBreaksTiesBySmallestKey) {
+    LampSet lamps = styled();
+    // Every key raised at the same time, in reverse order: only the key decides who goes.
+    for (int i = kCap - 1; i >= 0; --i) {
+        lamps.raise(LampKind::Agent, key_n(i), std::nullopt, t0, false);
+    }
+    ASSERT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+
+    lamps.raise(LampKind::Agent, "zz", std::nullopt, t0, false);
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+    lamps.clear(LampKind::Agent, key_n(0));
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind) << "k00 was evicted first";
+
+    lamps.raise(LampKind::Agent, "zy", std::nullopt, t0, false);
+    lamps.clear(LampKind::Agent, key_n(1));
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind) << "then k01";
+
+    // k02 is the smallest left, and it is still there.
+    lamps.clear(LampKind::Agent, key_n(2));
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind - 1);
 }

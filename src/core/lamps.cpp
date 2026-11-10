@@ -99,6 +99,11 @@ void LampSet::raise(LampKind kind, std::string key, std::optional<std::string> w
     }
     if (s.keys.empty()) {
         s.intro_start = play_intro ? std::optional<TimePoint>{now} : std::nullopt;
+    } else if (s.keys.size() >= kMaxKeysPerKind) {
+        // The oldest raise goes. `keys` is ordered by key and `min_element` keeps the first of
+        // equals, so on a tie the smallest key goes. The kind stays lit, so its intro is untouched.
+        s.keys.erase(std::ranges::min_element(
+            s.keys, {}, [](const auto &entry) { return entry.second.raised_at; }));
     }
     s.keys.emplace(std::move(key), Key{std::move(window), now});
 }
@@ -183,6 +188,8 @@ std::vector<LampKind> LampSet::active() const {
 bool LampSet::empty() const {
     return std::ranges::all_of(slots_, [](const Slot &s) { return s.keys.empty(); });
 }
+
+std::size_t LampSet::key_count(LampKind kind) const { return slot(kind).keys.size(); }
 
 LampSet::Slot &LampSet::slot(LampKind kind) { return slots_[static_cast<std::size_t>(kind)]; }
 
