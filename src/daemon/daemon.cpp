@@ -3,6 +3,7 @@
 #include "backend/mock.hpp"
 #include "sources/hwmon.hpp"
 #include "sources/hyprland.hpp"
+#include "sources/hyprland_bridge.hpp"
 #include "sources/system_dbus.hpp"
 #include "sources/theme.hpp"
 
@@ -666,13 +667,16 @@ int run_daemon(const RunOptions &opts) {
     });
 
     // Event sources run on the loop thread and feed handle_event directly.
-    std::optional<HyprlandSource> hyprland;
+    std::optional<HyprlandBridge> hyprland;
     std::optional<ThemeWatcher> theme;
     std::optional<std::filesystem::path> theme_dir;
     std::optional<HwmonPoller> hwmon;
     std::optional<SystemDbusSource> system;
     const auto emit = [&d](const Event &e) { d.handle_event(e); };
     const auto sync_sources = [&](const Config &c) {
+        if (hyprland) {
+            hyprland->configure(c.reactions.enabled);
+        }
         if (theme_dir != c.theme.dir) {
             theme.reset();
             theme.emplace(d.loop(), c.theme.dir, emit);

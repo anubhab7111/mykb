@@ -1,6 +1,6 @@
 #include "ipc/protocol.hpp"
 
-#include "util/strings.hpp"
+#include "core/window_address.hpp"
 
 #include <format>
 #include <nlohmann/json.hpp>
@@ -28,16 +28,13 @@ template <class T> std::optional<T> opt_get(const ojson &j, const char *key) {
     return j.at(key).get<T>();
 }
 
-/// R8: a window address is lowercase hex without the `0x` that `hyprctl clients -j` prints. An
-/// empty address (`""` or a bare `0x`) names no window.
+/// R8: the request's window in the daemon's canonical form. An empty address (`""` or a bare `0x`)
+/// names no window.
 std::optional<std::string> normalized_window(const std::optional<std::string> &window) {
     if (!window) {
         return std::nullopt;
     }
-    std::string address = to_lower(*window);
-    if (address.starts_with("0x")) {
-        address.erase(0, 2);
-    }
+    std::string address = normalize_window_address(*window);
     if (address.empty()) {
         return std::nullopt;
     }
