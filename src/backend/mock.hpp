@@ -4,6 +4,7 @@
 #include "backend/backend.hpp"
 
 #include <chrono>
+#include <cstddef>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -31,6 +32,8 @@ class MockHandle {
 
     /// Every successful call so far, in order.
     [[nodiscard]] std::vector<MockOp> ops() const;
+    /// How many times read_backlight was called, failed calls included.
+    [[nodiscard]] std::size_t backlight_reads() const;
     /// Makes every call fail with `e` until called again with nullopt.
     void fail_with(std::optional<BackendError> e);
     /// Simulates the Fn backlight key: what read_backlight returns from now on.

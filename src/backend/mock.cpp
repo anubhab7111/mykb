@@ -10,6 +10,7 @@ namespace omenkbd {
 struct MockState {
     mutable std::mutex m;
     std::vector<MockOp> ops;
+    std::size_t backlight_reads = 0;
     std::optional<BackendError> fail;
     bool hw_backlight = true;
     std::chrono::milliseconds delay{0};
@@ -18,6 +19,11 @@ struct MockState {
 std::vector<MockOp> MockHandle::ops() const {
     std::lock_guard lock(s_->m);
     return s_->ops;
+}
+
+std::size_t MockHandle::backlight_reads() const {
+    std::lock_guard lock(s_->m);
+    return s_->backlight_reads;
 }
 
 void MockHandle::fail_with(std::optional<BackendError> e) {
@@ -79,6 +85,7 @@ class MockBackend final : public Backend {
 
     std::expected<bool, BackendError> read_backlight() override {
         std::lock_guard lock(s_->m);
+        ++s_->backlight_reads;
         if (s_->fail) {
             return std::unexpected(*s_->fail);
         }

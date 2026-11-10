@@ -47,6 +47,11 @@ std::expected<Change, std::string> Model::handle(const Request &r, TimePoint now
         std::holds_alternative<req::Reload>(r)) {
         return Change::None;
     }
+    // The daemon turns these into signals (`to_signal`) and delivers them itself, reading the
+    // backlight first when a reaction could start (`Daemon::deliver_signal`).
+    if (std::holds_alternative<req::Notify>(r) || std::holds_alternative<req::Agent>(r)) {
+        return Change::None;
+    }
     if (const auto *s = std::get_if<req::Set>(&r)) {
         if (s->colors.size() != 1 && s->colors.size() != 4) {
             return R(std::unexpect,

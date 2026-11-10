@@ -3,6 +3,7 @@
 // loop; every change recomputes one frame and hands it to the writer thread.
 
 #include "backend/backend.hpp"
+#include "core/signals.hpp"
 #include "daemon/event_loop.hpp"
 #include "daemon/events.hpp"
 #include "daemon/model.hpp"
@@ -82,6 +83,23 @@ class Daemon {
         Request request;
         TimePoint deadline;
     };
+    /// A signal delivered only after a fresh backlight read, or when the read times out.
+    struct PendingSignal {
+        Signal signal;
+        TimePoint deadline;
+    };
+
+    /// Hands a signal to the model (R3, R4). Off, it is dropped before any read. A signal that
+    /// could start a reaction while the backlight reading is stale (older than kBacklightFresh)
+    /// waits for a read, and every later signal queues behind it so none overtakes another.
+    void deliver_signal(const Signal &s);
+    /// Applies the waiting signals in order, then shows them in one frame.
+    void flush_pending_signals();
+    /// Shows what a signal changed: at once, unless an effect ticks (Ruling P16), whose next tick
+    /// samples the reactions, so a signal adds no write of its own.
+    void show_reactions();
+    /// When the reaction layers next need a frame: only while no effect ticks (spec 5.7).
+    [[nodiscard]] std::optional<TimePoint> reaction_wake() const;
 
     std::optional<std::uint64_t> recompute();
     [[nodiscard]] Status status() const {
@@ -127,11 +145,14 @@ class Daemon {
     std::optional<Status> last_status_;
     std::vector<Pending> pending_;
     std::vector<ProbeWaiter> awaiting_probe_;
+    /// In arrival order, so the oldest deadline is the first; never longer than kMaxPendingSignals.
+    std::vector<PendingSignal> pending_signals_;
     /// The newest generation the writer reported on, and the newest job that writes the
     /// backlight: a read taken before that job landed may show the old state, so it is dropped.
     std::uint64_t completed_generation_ = 0;
     std::uint64_t backlight_generation_ = 0;
     std::optional<TimePoint> save_at_;
+    /// Set while the last output was animated: an effect ticks.
     std::optional<TimePoint> next_tick_;
     std::optional<TimePoint> next_probe_;
     std::optional<EventLoop::TimerId> wake_timer_;

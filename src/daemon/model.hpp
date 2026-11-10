@@ -64,7 +64,8 @@ class Model {
   public:
     Model(Config config, Palette palette, PersistedState persisted, std::string backend);
 
-    /// Applies a request. Status/Subscribe/Reload are handled by the daemon (Change::None).
+    /// Applies a request. Status/Subscribe/Reload, and Notify/Agent (signals: see `apply_signal`),
+    /// are handled by the daemon (Change::None).
     std::expected<Change, std::string> handle(const Request &r, TimePoint now);
 
     /// Also reconfigures the reactions, and refreshes their deadline (a shorter TTL or blink can
