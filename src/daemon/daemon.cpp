@@ -23,6 +23,11 @@ using namespace std::chrono_literals;
 
 constexpr Clock::duration kReplyTimeout = 2s;
 constexpr Clock::duration kProbeEvery = 3s;
+/// A backlight reading this old still holds when a reaction starts; an older one is read again
+/// first, because the Fn key changes the backlight without any event (spec 5.7).
+constexpr Clock::duration kBacklightFresh = 5s;
+/// Signals waiting for a read beyond this many are delivered at once, as if the read had timed out.
+constexpr std::size_t kMaxPendingSignals = 1024;
 constexpr Clock::duration kSaveUserChange = 1s;
 constexpr Clock::duration kSaveCounterOnly = 60s;
 constexpr Clock::duration kAcceptRetry = 100ms;
@@ -107,6 +112,10 @@ void Daemon::post(Event ev) {
 }
 
 void Daemon::handle_event(const Event &ev) {
+    if (const auto *s = std::get_if<Signal>(&ev)) {
+        deliver_signal(*s); // it decides whether a frame follows, and when
+        return;
+    }
     std::visit(
         [this](const auto &e) {
             using T = std::decay_t<decltype(e)>;
@@ -133,6 +142,54 @@ void Daemon::handle_event(const Event &ev) {
         },
         ev);
     recompute();
+}
+
+// ── signals ────────────────────────────────────────────────────────────────
+
+void Daemon::deliver_signal(const Signal &s) {
+    if (!model_.config().reactions.enabled) {
+        return; // R4: off means off, not even a read
+    }
+    const TimePoint now = Clock::now();
+    const bool needs_read =
+        may_start_reaction(s) && !model_.backlight_reading_fresh(now, kBacklightFresh);
+    if (pending_signals_.empty() && !needs_read) {
+        model_.apply_signal(s, now);
+        show_reactions();
+        return;
+    }
+    // Behind a waiting signal, one that needs no read waits too: a clear must not overtake the
+    // raise it clears.
+    pending_signals_.push_back({s, now + kReplyTimeout});
+    if (pending_signals_.size() >= kMaxPendingSignals) {
+        flush_pending_signals(); // a flood: as if the read had timed out
+    } else if (pending_signals_.size() == 1) {
+        writer_->probe(); // one read for the whole list: its result flushes it (on_writer)
+    }
+}
+
+void Daemon::flush_pending_signals() {
+    if (pending_signals_.empty()) {
+        return;
+    }
+    // One `now` for all, not each arrival time: frames composed since then have already moved the
+    // reactions past it.
+    const TimePoint now = Clock::now();
+    for (const PendingSignal &p : std::exchange(pending_signals_, {})) {
+        model_.apply_signal(p.signal, now);
+    }
+    show_reactions();
+}
+
+void Daemon::show_reactions() {
+    if (!next_tick_) {
+        recompute();
+    }
+}
+
+std::optional<TimePoint> Daemon::reaction_wake() const {
+    // During an effect its ticks sample the reactions, so they add no wake-ups and no writes.
+    return next_tick_ ? std::nullopt : model_.reaction_deadline();
 }
 
 // ── frame ──────────────────────────────────────────────────────────────────
@@ -311,6 +368,17 @@ void Daemon::handle_line(std::uint64_t id, Client &c, const std::string &line) {
 }
 
 void Daemon::on_request(std::uint64_t id, Client &c, const Request &r, bool backlight_read) {
+    // `notify` and `agent` report a signal. They are answered at once, before any read or write
+    // (R3), so the hooks that send them return fast; deliver_signal reads first if it must.
+    if (const auto s = to_signal(r)) {
+        if (!*s) {
+            respond(id, Response::failure(s->error()));
+            return;
+        }
+        deliver_signal(**s);
+        respond(id, Response::success(status()));
+        return;
+    }
     if (!backlight_read && needs_backlight_read(r)) {
         awaiting_probe_.push_back({id, r, Clock::now() + kReplyTimeout});
         c.awaiting = true;
@@ -423,7 +491,7 @@ void Daemon::on_writer() {
             if (completed_generation_ < backlight_generation_) {
                 // The writer reads before it takes a waiting job, so this read may predate our
                 // own backlight write; ask again (the job goes first now that the slot is busy).
-                if (!awaiting_probe_.empty()) {
+                if (!awaiting_probe_.empty() || !pending_signals_.empty()) {
                     writer_->probe();
                 }
                 continue;
@@ -432,9 +500,10 @@ void Daemon::on_writer() {
                 model_.set_hw_backlight(*probe.result, Clock::now());
                 recompute();
             }
-            // A failed probe is not actionable: waiters go on with what the daemon knows, and
-            // the next periodic probe retries.
+            // A failed probe is not actionable: waiters and waiting signals go on with what the
+            // daemon knows, and the next periodic probe retries.
             release_probe_waiters();
+            flush_pending_signals();
         }
     }
 }
@@ -460,6 +529,7 @@ std::optional<TimePoint> Daemon::next_wake() const {
     };
     consider(next_tick_);
     consider(model_.hint_deadline());
+    consider(reaction_wake());
     consider(save_at_);
     consider(next_probe_);
     for (const Pending &p : pending_) {
@@ -467,6 +537,9 @@ std::optional<TimePoint> Daemon::next_wake() const {
     }
     for (const ProbeWaiter &p : awaiting_probe_) {
         consider(p.deadline);
+    }
+    if (!pending_signals_.empty()) {
+        consider(pending_signals_.front().deadline);
     }
     return w;
 }
@@ -517,7 +590,13 @@ void Daemon::on_wake() {
                             [&](const ProbeWaiter &p) { return due(p.deadline); })) {
         release_probe_waiters();
     }
-    if (due(next_tick_) || due(model_.hint_deadline())) {
+    // Nor the signals: they are delivered as if the backlight were on.
+    if (!pending_signals_.empty() && due(pending_signals_.front().deadline)) {
+        flush_pending_signals();
+    }
+    // The reaction deadline includes the past one of a visibility change (Ruling P17): the frame
+    // takes the new visibility and moves the deadline on, or the loop would wake here forever.
+    if (due(next_tick_) || due(model_.hint_deadline()) || due(reaction_wake())) {
         recompute();
     }
 }

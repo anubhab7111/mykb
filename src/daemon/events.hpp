@@ -2,6 +2,7 @@
 // Things that happen outside the daemon (system D-Bus, Hyprland, theme switch, …), delivered to
 // Daemon::handle_event on the loop thread.
 
+#include "core/signals.hpp"
 #include "daemon/model.hpp"
 
 #include <optional>
@@ -31,7 +32,9 @@ struct HwBacklight {
 };
 } // namespace event
 
-using Event =
-    std::variant<FactUpdate, event::Sleep, event::Submap, event::ThemeChanged, event::HwBacklight>;
+/// A `Signal` from the Hyprland side goes to `Daemon::deliver_signal`, which reads the backlight
+/// first when a reaction could start.
+using Event = std::variant<FactUpdate, event::Sleep, event::Submap, event::ThemeChanged,
+                           event::HwBacklight, Signal>;
 
 } // namespace omenkbd

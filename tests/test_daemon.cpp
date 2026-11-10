@@ -2,15 +2,19 @@
 // time. Each test runs Daemon::run() on its own thread and stops it in TearDown.
 
 #include "helpers.hpp"
+#include "reaction_rig.hpp"
 
 #include "backend/mock.hpp"
+#include "core/effects.hpp"
 #include "daemon/daemon.hpp"
 #include "ipc/socket.hpp"
 
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <ctime>
 #include <future>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <thread>
@@ -50,6 +54,61 @@ Rgb rgb(std::string_view hex) { return Rgb::parse(hex).value(); }
 std::array<Rgb, 4> all(Rgb c) { return {c, c, c, c}; }
 
 Request set(std::vector<std::string> colors) { return req::Set{std::move(colors)}; }
+
+// The colors of kRigConfig (tests/reaction_rig.hpp), whose first profile `plain` is static: the
+// reaction tests below give the daemon the stimuli of the write-count tests and expect the frames
+// the rig counts there.
+constexpr Rgb kL{0x10, 0x10, 0x10};
+constexpr Rgb kM{0x20, 0x20, 0x20};
+constexpr Rgb kR{0x30, 0x30, 0x30};
+constexpr Rgb kW{0x40, 0x40, 0x40};
+constexpr Frame kBase{kL, kM, kR, kW};
+constexpr Rgb kZapZap{0x20, 0xff, 0x40};
+constexpr Rgb kUrgent{0xff, 0xe0, 0x20};
+constexpr Rgb kWaiting{0xff, 0x90, 0x40};
+
+/// `frame` with `zones` painted `color`.
+Frame paint(Frame frame, std::initializer_list<Zone> zones, Rgb color) {
+    for (Zone z : zones) {
+        frame[index(z)] = color;
+    }
+    return frame;
+}
+
+/// `frame` with every zone moved half way toward white, as a window opening lifts it.
+Frame lifted(Frame frame) {
+    for (Rgb &z : frame) {
+        z = Rgb::lerp(z, kWhite, 0.5);
+    }
+    return frame;
+}
+
+/// `frame` with every zone dipped to 35%, as a window closing dims it.
+Frame dipped(Frame frame) {
+    for (Rgb &z : frame) {
+        z = multiply(z, 0.35);
+    }
+    return frame;
+}
+
+/// `frame` at brightness `pct`.
+Frame scaled(Frame frame, std::uint8_t pct) {
+    for (Rgb &z : frame) {
+        z = z.scale(pct);
+    }
+    return frame;
+}
+
+/// What the daemon writes for a logical frame: the zones in hardware order (the default map).
+std::array<Rgb, 4> hw(const Frame &logical) { return ZoneMap{}.to_hw(logical); }
+
+std::vector<std::array<Rgb, 4>> hw_frames(std::initializer_list<Frame> logical) {
+    std::vector<std::array<Rgb, 4>> out;
+    for (const Frame &f : logical) {
+        out.push_back(hw(f));
+    }
+    return out;
+}
 
 class DaemonTest : public ::testing::Test {
   protected:
@@ -98,6 +157,35 @@ class DaemonTest : public ::testing::Test {
             }
         }
         return out;
+    }
+
+    /// The zone writes after the first `from`.
+    [[nodiscard]] std::vector<std::array<Rgb, 4>> zone_writes_since(std::size_t from) const {
+        const auto writes = zone_writes();
+        const auto skip = static_cast<std::ptrdiff_t>(std::min(from, writes.size()));
+        return {writes.begin() + skip, writes.end()};
+    }
+
+    /// Keeps the writer inside one slow zone write for `d` (kRigConfig's fullscreen rule dims the
+    /// frame to 15%), so a backlight read asked for meanwhile waits behind it. Later writes are
+    /// quick again.
+    void stall_writer(std::chrono::milliseconds d) {
+        h().set_delay(d);
+        daemon_->post(FactUpdate{fact::FullscreenApp{"mpv"}});
+        std::this_thread::sleep_for(100ms); // the writer is inside the slow write
+        h().set_delay(0ms);
+    }
+
+    /// The CPU time the daemon's loop thread has used so far.
+    [[nodiscard]] std::chrono::nanoseconds loop_cpu_time() {
+        clockid_t clock{};
+        timespec ts{};
+        if (::pthread_getcpuclockid(thread_.native_handle(), &clock) != 0 ||
+            ::clock_gettime(clock, &ts) != 0) {
+            ADD_FAILURE() << "cannot read the loop thread's CPU clock";
+            return {};
+        }
+        return std::chrono::seconds(ts.tv_sec) + std::chrono::nanoseconds(ts.tv_nsec);
     }
 
     Response req(const Request &r) {
@@ -564,6 +652,231 @@ TEST_F(DaemonTest, InvalidUtf8LineGetsAnErrorAndTheDaemonSurvives) {
     EXPECT_FALSE(got[0].ok);
     EXPECT_TRUE(got[1].ok);
     EXPECT_EQ(status().profile, "plain") << "new connections are still served";
+}
+
+// ── reactions ──────────────────────────────────────────────────────────────
+// Each test starts on kRigConfig's static profile. The startup frame writes the backlight, so the
+// daemon holds no backlight reading until something reads it.
+
+TEST_F(DaemonTest, WindowOpenedSignalPlaysAPulseAndRestores) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    daemon_->post(Event{signal::WindowOpened{}});
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 2; }, 2000ms));
+    std::this_thread::sleep_for(300ms); // nothing follows
+    EXPECT_EQ(zone_writes_since(before), hw_frames({lifted(kBase), kBase}))
+        << "50% toward white, then back";
+}
+
+TEST_F(DaemonTest, NotifyRequestIsAnsweredAtOnceAndFlashes) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    h().set_delay(800ms); // every write is slow: a reply that waited for one would come late
+    const auto sent = Clock::now();
+    const Response r = req(req::Notify{"ZapZap", "com.rtosta.zapzap", "normal"});
+    const auto took = Clock::now() - sent;
+    EXPECT_TRUE(r.ok) << r.error.value_or("");
+    EXPECT_TRUE(r.status.has_value());
+    EXPECT_LT(took, 500ms) << "the reply does not wait for the read or the write";
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 2; }, 3000ms));
+    h().set_delay(0ms);
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(zone_writes_since(before), hw_frames({all(kZapZap), kBase}));
+}
+
+TEST_F(DaemonTest, AgentWaitingHoldsTheLampWithoutFurtherWrites) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    const Frame lit = paint(kBase, {Zone::Wasd}, kWaiting);
+    const Response waiting = req(req::Agent{"waiting", "s1", std::nullopt, "test"});
+    EXPECT_TRUE(waiting.ok) << waiting.error.value_or("");
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 3; }, 2000ms));
+    std::this_thread::sleep_for(1s);
+    EXPECT_EQ(zone_writes_since(before), hw_frames({lit, kBase, lit}))
+        << "on, off, on, then held with no further write";
+
+    const Response working = req(req::Agent{"working", "s1", std::nullopt, "test"});
+    EXPECT_TRUE(working.ok) << working.error.value_or("");
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 4; }, 2000ms));
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(zone_writes_since(before), hw_frames({lit, kBase, lit, kBase}));
+}
+
+TEST_F(DaemonTest, BadNotifyOrAgentRequestIsAFailure) {
+    start(kRigConfig);
+    const Response n = req(req::Notify{"ZapZap", "com.rtosta.zapzap", "loud"});
+    EXPECT_FALSE(n.ok);
+    EXPECT_NE(n.error.value_or("").find("unknown urgency"), std::string::npos)
+        << n.error.value_or("");
+    const Response a = req(req::Agent{"sleeping", "s1", std::nullopt, "test"});
+    EXPECT_FALSE(a.ok);
+    EXPECT_NE(a.error.value_or("").find("unknown agent state"), std::string::npos)
+        << a.error.value_or("");
+}
+
+TEST_F(DaemonTest, StaleBacklightReadingCausesOneReadBeforeAReaction) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    const auto reads = h().backlight_reads();
+    // Signals that only update or clear what shows need no reading.
+    daemon_->post(Event{signal::FocusChanged{"a1", "kitty"}});
+    daemon_->post(Event{signal::UrgentCleared{"a1"}});
+    daemon_->post(Event{signal::AgentWorking{"s1"}});
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(h().backlight_reads(), reads);
+    EXPECT_EQ(zone_writes().size(), before);
+
+    daemon_->post(Event{signal::WindowOpened{}});
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 2; }, 2000ms));
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(h().backlight_reads(), reads + 1);
+    EXPECT_EQ(zone_writes_since(before), hw_frames({lifted(kBase), kBase}));
+}
+
+TEST_F(DaemonTest, TwoReactionsWithinFiveSecondsCauseOneRead) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    const auto reads = h().backlight_reads();
+    daemon_->post(Event{signal::WindowOpened{}});
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 2; }, 2000ms));
+    std::this_thread::sleep_for(600ms); // past the 500 ms window cooldown
+    daemon_->post(Event{signal::WindowClosed{}});
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 4; }, 2000ms));
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(h().backlight_reads(), reads + 1) << "the second reaction uses the first reading";
+    EXPECT_EQ(zone_writes_since(before), hw_frames({lifted(kBase), kBase, dipped(kBase), kBase}));
+}
+
+TEST_F(DaemonTest, ReactionOnADarkKeyboardWritesNothing) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    const auto ops = h().ops();
+    const auto reads = h().backlight_reads();
+    h().set_hw_backlight(false); // the Fn key: nothing reports it
+    daemon_->post(Event{signal::WindowOpened{}});
+    EXPECT_TRUE(wait_until([&] { return h().backlight_reads() > reads; }, 2000ms));
+    daemon_->post(Event{signal::UrgentRaised{"a1"}});
+    daemon_->post(Event{signal::AgentWaiting{"s1", std::nullopt}});
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(h().ops(), ops) << "no zone or backlight write";
+    EXPECT_EQ(h().backlight_reads(), reads + 1) << "one read covers the three signals";
+
+    // The Fn key turns the light back on, and the next read shows both lamps steady: one write.
+    h().set_hw_backlight(true);
+    EXPECT_TRUE(status().on);
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 1; }, 2000ms));
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(zone_writes_since(before),
+              hw_frames({paint(paint(kBase, {Zone::Right}, kUrgent), {Zone::Wasd}, kWaiting)}))
+        << "both lamps, steady, no blink";
+}
+
+TEST_F(DaemonTest, DisabledReactionsIgnoreSignalsWithoutReading) {
+    start(kStaticCfg); // no [reactions] table: off
+    const auto ops = h().ops();
+    const auto reads = h().backlight_reads();
+    daemon_->post(Event{signal::WindowOpened{}});
+    daemon_->post(Event{signal::UrgentRaised{"a1"}});
+    const Response n = req(req::Notify{"ZapZap", "com.rtosta.zapzap", "critical"});
+    EXPECT_TRUE(n.ok) << n.error.value_or("");
+    const Response a = req(req::Agent{"waiting", "s1", std::nullopt, "test"});
+    EXPECT_TRUE(a.ok) << a.error.value_or("");
+    std::this_thread::sleep_for(300ms);
+    EXPECT_EQ(h().backlight_reads(), reads) << "off means off: not even a read";
+    EXPECT_EQ(h().ops(), ops);
+}
+
+TEST_F(DaemonTest, OrderIsKeptWhileAReadIsPending) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    stall_writer(300ms);
+    // The waiting session asks for a read, which waits behind the slow write; the session goes
+    // back to work before the read lands. Applied in order, the lamp never lights.
+    daemon_->post(Event{signal::AgentWaiting{"s1", std::nullopt}});
+    daemon_->post(Event{signal::AgentWorking{"s1"}});
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 1; }, 2000ms));
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(zone_writes_since(before), hw_frames({scaled(kBase, 15)}))
+        << "only the fullscreen dim: the lamp never lit";
+    EXPECT_TRUE(status().reactions.lamps.empty());
+}
+
+TEST_F(DaemonTest, FloodWhileAReadIsPendingStaysBounded) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    const auto reads = h().backlight_reads();
+    stall_writer(500ms);
+    for (int i = 0; i < 5000; ++i) {
+        daemon_->post(Event{signal::WindowOpened{}});
+    }
+    const auto asked = Clock::now();
+    const Response r = req(req::Status{});
+    EXPECT_TRUE(r.ok) << r.error.value_or("");
+    EXPECT_LT(Clock::now() - asked, 2s) << "the daemon keeps answering";
+    std::this_thread::sleep_for(1s); // every clip has ended
+    const auto writes = zone_writes_since(before);
+    EXPECT_LE(writes.size(), 8u);
+    ASSERT_FALSE(writes.empty());
+    EXPECT_EQ(writes.back(), hw(scaled(kBase, 15))) << "the keyboard ends on the dimmed base";
+    EXPECT_LE(h().backlight_reads() - reads, 10u) << "reads do not follow the flood";
+}
+
+// Ruling P16: while an effect ticks, a signal adds no frame of its own; the ticks sample it.
+TEST_F(DaemonTest, SignalsOnARunningEffectAddNoWrites) {
+    start(kRigConfig);
+    ASSERT_TRUE(req(req::Profile{"wavy"}).ok);
+    EXPECT_TRUE(status().animated); // also a fresh reading: no signal below waits for a read
+    const auto a = zone_writes().size();
+    const auto end = Clock::now() + 1s;
+    for (int i = 0; Clock::now() < end; ++i) { // about 40 signals, 25 ms apart
+        if (i % 2 == 0) {
+            daemon_->post(Event{signal::WindowOpened{}});
+        } else {
+            daemon_->post(Event{signal::FocusChanged{i % 4 == 1 ? "a1" : "b2", "kitty"}});
+        }
+        std::this_thread::sleep_for(25ms);
+    }
+    const auto n = zone_writes().size() - a;
+    // The effect's own 10 ticks a second (as in EffectTicksAtConfiguredFps), plus the frame of a
+    // periodic backlight probe; a frame per signal would add about 40.
+    EXPECT_LE(n, 13u) << n << " writes in 1 s at 10 fps with about 40 signals";
+    EXPECT_GE(n, 5u) << n << " writes in 1 s at 10 fps";
+}
+
+// Ruling P17: a lamp is held while the Fn key has the backlight off; `toggle` brings the light
+// back, and the lamp shows in one more write with no other event, and the loop then idles.
+TEST_F(DaemonTest, FnKeyThenToggleShowsTheHeldLampInOneWrite) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    const Frame lit = paint(kBase, {Zone::Right}, kUrgent);
+    daemon_->post(Event{signal::UrgentRaised{"a1"}});
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 3; }, 2000ms));
+    std::this_thread::sleep_for(300ms);
+    ASSERT_EQ(zone_writes_since(before), hw_frames({lit, kBase, lit}));
+
+    // The read before `status` sees the Fn key's off, and the lamp is no longer drawn: the write
+    // the rig counts too.
+    h().set_hw_backlight(false);
+    EXPECT_FALSE(status().on);
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 4; }, 2000ms));
+    EXPECT_EQ(zone_writes().back(), hw(kBase));
+    auto expected = h().ops();
+
+    const Response r = req(req::Power{req::PowerAction::Toggle});
+    EXPECT_TRUE(r.ok) << r.error.value_or("");
+    EXPECT_TRUE(wait_until([&] { return h().ops().size() >= expected.size() + 2; }, 2000ms));
+    std::this_thread::sleep_for(300ms);
+    expected.push_back(MockOp::backlight_op(true));
+    expected.push_back(MockOp::zones_op(hw(lit)));
+    EXPECT_EQ(h().ops(), expected) << "the backlight on, then the lamp, steady";
+
+    // The deadline that woke the loop moved on: nothing more is written, and the loop sleeps.
+    const auto cpu = loop_cpu_time();
+    const auto ops = h().ops().size();
+    std::this_thread::sleep_for(1s);
+    EXPECT_EQ(h().ops().size(), ops);
+    const auto busy = std::chrono::duration_cast<std::chrono::milliseconds>(loop_cpu_time() - cpu);
+    EXPECT_LT(busy, 250ms) << "the loop thread used " << busy.count() << " ms of CPU in 1 s";
 }
 
 TEST(EventLoop, TimersRunInOrderPostWorksAcrossThreadsAndCancelSkips) {
