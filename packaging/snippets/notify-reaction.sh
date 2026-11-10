@@ -8,10 +8,11 @@
 # The flash line sits in the not-in-DND branch, so do-not-disturb silences it like the ping. It runs
 # detached (`&`) and before paplay, so neither waits for the other, and swaync never waits for either.
 # The daemon decides the rest: it skips low urgency and the focused app's own notifications. The
-# line uses the full path because ~/.local/bin is not on the PATH of what Hyprland starts.
+# line uses the full path because ~/.local/bin is not on the PATH of what Hyprland starts. An empty
+# SWAYNC_URGENCY counts as normal: the CLI rejects an empty urgency, and the output is hidden.
 
 ( [ "$(swaync-client -D -sw 2>/dev/null)" = true ] || {
     ~/.local/bin/omen-kbd notify --app "$SWAYNC_APP_NAME" \
-        --desktop-entry "$SWAYNC_DESKTOP_ENTRY" --urgency "$SWAYNC_URGENCY" &
+        --desktop-entry "$SWAYNC_DESKTOP_ENTRY" --urgency "${SWAYNC_URGENCY:-normal}" &
     paplay /usr/share/sounds/freedesktop/stereo/message.oga
 } ) >/dev/null 2>&1 &

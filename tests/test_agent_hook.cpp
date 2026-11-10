@@ -628,5 +628,22 @@ TEST_F(AgentHook, NotifySnippetFlashesOutsideDoNotDisturbOnly) {
                            "notify --app ZapZap --desktop-entry zapzap --urgency Normal"}));
 }
 
+// Live check (2026-11-11): the CLI rejects an empty --urgency with exit 64, and the snippet hides
+// its output, so a swaync that leaves SWAYNC_URGENCY empty would silently lose the flash.
+TEST_F(AgentHook, NotifySnippetFallsBackToNormalWhenSwayncLeavesTheUrgencyEmpty) {
+    const fs::path home = root() / "home";
+    write_exec(home / ".local" / "bin" / "omen-kbd", fake_omen_kbd());
+    write_exec(bin_dir() / "paplay", "#!/bin/bash\ntrue\n");
+    write_exec(bin_dir() / "swaync-client", "#!/bin/bash\necho false\n");
+    const auto r = run("env -i PATH='" + bin_dir().string() + ":/usr/bin:/bin' HOME=" + shq(home) +
+                       " SWAYNC_APP_NAME=ZapZap SWAYNC_DESKTOP_ENTRY=zapzap SWAYNC_URGENCY= "
+                       "/bin/bash " +
+                       shq(source_path("packaging/snippets/notify-reaction.sh")));
+    EXPECT_EQ(r.code, 0);
+    ASSERT_TRUE(wait_until([&] { return !calls().empty(); }, std::chrono::seconds(3)));
+    EXPECT_EQ(calls(), (std::vector<std::string>{
+                           "notify --app ZapZap --desktop-entry zapzap --urgency normal"}));
+}
+
 } // namespace
 } // namespace omenkbd
