@@ -75,6 +75,14 @@ Layers Reactions::layers(TimePoint now) const {
 
 std::optional<TimePoint> Reactions::next_change() const { return next_change_; }
 
+bool Reactions::visibility_differs(Visibility visibility) const {
+    if (!visibility_taken_) {
+        return visibility.keyboard_visible;
+    }
+    return visibility.keyboard_visible != visibility_.keyboard_visible ||
+           visibility.user_present != visibility_.user_present;
+}
+
 ReactionsStatus Reactions::status() const {
     ReactionsStatus out;
     out.enabled = cfg_.enabled;
@@ -89,6 +97,7 @@ ReactionsStatus Reactions::status() const {
 
 void Reactions::tick(TimePoint now, Visibility visibility) {
     visibility_ = visibility;
+    visibility_taken_ = true;
     lamps_.expire(now);
     player_.advance(now);
     if (!short_ok()) {

@@ -376,7 +376,8 @@ TEST(Model, StatusReportsOutputZones) {
 TEST(Model, InputsCarryTheReactionLayersAndTheDeadline) {
     Model m = react_model();
     const TimePoint t0 = Clock::now();
-    EXPECT_EQ(m.reaction_deadline(), std::nullopt);
+    ASSERT_TRUE(m.inputs(t0).has_value());
+    EXPECT_EQ(m.reaction_deadline(), std::nullopt) << "nothing is lit or playing";
     m.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
     m.apply_signal(signal::UrgentRaised{"a1"}, t0);
     EXPECT_EQ(m.reaction_deadline(), t0 + 120ms);
@@ -539,4 +540,48 @@ TEST(Model, ReactionColorWarningsShowOnlyWhileEnabled) {
     // Reactions off resolve nothing anyone would see, so they warn about nothing.
     cfg.replace(cfg.find("[reactions]\n"), 12, "[reactions]\nenabled = false\n");
     EXPECT_FALSE(warned(react_model(cfg)));
+}
+
+// Ruling P17: when the visibility changes without a frame after it (the daemon forgets its
+// backlight reading after composing a forced write; a spent budget clears in `record_write`), the
+// deadline says a frame is due at once. One frame takes the new visibility, and it is not due
+// again.
+TEST(Model, AVisibilityChangeIsDueOnceThenTheDeadlineMovesOn) {
+    const TimePoint t0 = Clock::now();
+    const auto due = [](const Model &m, TimePoint now) {
+        const std::optional<TimePoint> d = m.reaction_deadline();
+        return d && *d <= now;
+    };
+    Model m = react_model();
+    EXPECT_TRUE(due(m, t0)) << "the first frame takes the visibility";
+    m.apply_signal(signal::AgentWaiting{"s1", std::nullopt}, t0);
+    ASSERT_TRUE(m.inputs(t0 + 1s).has_value()); // the intro is over
+    ASSERT_EQ(m.reaction_deadline(), t0 + 3600s);
+
+    m.set_hw_backlight(false, t0 + 2s); // the Fn key, read before a toggle
+    EXPECT_TRUE(due(m, t0 + 2s));
+    EXPECT_TRUE(empty(m.inputs(t0 + 2s)->lamps));
+    EXPECT_EQ(m.reaction_deadline(), t0 + 3600s) << "taken: not due again";
+
+    m.forget_hw_backlight(); // the forced write turns the backlight on
+    EXPECT_TRUE(due(m, t0 + 2s));
+    EXPECT_EQ(m.inputs(t0 + 2s)->lamps, lit(kPeach, {Zone::Wasd})) << "steady at once";
+    EXPECT_EQ(m.reaction_deadline(), t0 + 3600s);
+
+    m.record_write(std::unexpected(BackendError{BackendError::Kind::Budget, ""}));
+    EXPECT_TRUE(due(m, t0 + 3s));
+    EXPECT_TRUE(empty(m.inputs(t0 + 3s)->lamps));
+    m.record_write(true);
+    EXPECT_TRUE(due(m, t0 + 4s));
+    EXPECT_EQ(m.inputs(t0 + 4s)->lamps, lit(kPeach, {Zone::Wasd}));
+    EXPECT_EQ(m.reaction_deadline(), t0 + 3600s);
+
+    // With reactions off nothing is ever due.
+    Model off = hex_model();
+    EXPECT_EQ(off.reaction_deadline(), std::nullopt);
+    off.set_hw_backlight(false, t0);
+    EXPECT_EQ(off.reaction_deadline(), std::nullopt);
+    ASSERT_TRUE(off.inputs(t0).has_value());
+    off.forget_hw_backlight();
+    EXPECT_EQ(off.reaction_deadline(), std::nullopt);
 }

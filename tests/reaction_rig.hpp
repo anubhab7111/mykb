@@ -1,9 +1,11 @@
 #pragma once
 // A stand-in for the daemon's frame loop, for the write-count tests (spec section 6). It drives a
-// `Model` with a fake clock the way the daemon does: it applies a signal, fact or request and
-// composes the frame at once, and between events it wakes at the effect's ticks while the output is
-// animated, otherwise at the model's reaction deadline. It counts what the writer would write: one
-// write per change of (backlight, hardware zones), because the daemon skips an identical frame.
+// `Model` with a fake clock the way the daemon does: a fact, a request or a backlight reading is
+// applied and the frame composed at once; a signal too, except while an effect ticks, when the next
+// tick samples it (Ruling P16). Between events it wakes only where `Daemon::next_wake` would: at
+// the effect's next tick while the output is animated, otherwise at the model's reaction deadline.
+// It counts what the writer would write: one write per change of (backlight, hardware zones),
+// because the daemon skips an identical frame.
 
 #include "config.hpp"
 #include "core/compositor.hpp"
@@ -19,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace omenkbd::test {
@@ -80,10 +83,13 @@ class ReactionRig {
     /// The fake clock.
     [[nodiscard]] TimePoint now() const { return now_; }
 
-    /// A signal arrives: the daemon applies it and recomputes.
+    /// A signal arrives: the daemon applies it and recomputes, except while an effect ticks
+    /// (Ruling P16): then the next tick samples it, so a signal adds no write on an animated base.
     void signal(const Signal &s) {
         model_.apply_signal(s, now_);
-        sample();
+        if (!next_tick_) {
+            sample();
+        }
     }
 
     /// A fact changes: the daemon applies it and recomputes.
@@ -92,7 +98,9 @@ class ReactionRig {
         sample();
     }
 
-    /// A client request: the daemon recomputes unless nothing changed.
+    /// A client request: the daemon recomputes unless nothing changed. A power request always
+    /// writes the backlight (`force_backlight_next_` in `Daemon::on_request`), because the Fn key
+    /// may have changed it behind the daemon's back.
     void request(const Request &r) {
         const auto change = model_.handle(r, now_);
         if (!change) {
@@ -100,6 +108,7 @@ class ReactionRig {
             return;
         }
         if (*change != Change::None) {
+            force_backlight_ = force_backlight_ || std::holds_alternative<req::Power>(r);
             sample();
         }
     }
@@ -116,29 +125,27 @@ class ReactionRig {
         sample();
     }
 
-    /// Lets `d` pass, waking where the daemon would: at the effect's ticks while the last output
-    /// was animated (they sample the reactions), otherwise at the reaction deadline. The last
-    /// sample is at the end of `d`.
+    /// Lets `d` pass, waking only where the daemon would (`Daemon::next_wake`): at the effect's
+    /// next tick while the last output was animated (the ticks sample the reactions), otherwise at
+    /// the reaction deadline. The end of `d` is no wake, so a deadline that comes late shows as a
+    /// missing or late write.
     void run_for(Duration d) {
         const TimePoint end = now_ + d;
         int stalls = 0;
-        while (now_ < end) {
-            TimePoint next = end;
-            if (animated_) {
-                next = std::min(next, now_ + tick());
-            } else if (const std::optional<TimePoint> deadline = model_.reaction_deadline()) {
-                // A deadline that is not after now is overdue: the daemon wakes at once.
-                next = std::clamp(*deadline, now_, next);
-            }
+        for (std::optional<TimePoint> wake = next_wake(); wake && *wake <= end;
+             wake = next_wake()) {
+            // A deadline that is not after now is overdue: the daemon wakes at once.
+            const TimePoint next = std::max(*wake, now_);
             if (next > now_) {
                 stalls = 0;
             } else if (++stalls > 1) {
                 ADD_FAILURE() << "the reaction deadline stays at or before now after a sample";
-                return;
+                break;
             }
             now_ = next;
             sample();
         }
+        now_ = end;
     }
 
     /// The frames written so far: each change after the first frame.
@@ -161,31 +168,49 @@ class ReactionRig {
         return std::chrono::milliseconds(1000 / std::max(1, int{model_.config().effects.fps}));
     }
 
-    /// The daemon's `recompute()`: compose the frame at `now_` and count it when the writer would
-    /// write it. While suspended there is no frame and nothing ticks.
+    /// Where `Daemon::next_wake` would wake for the frame: the next tick while animated, otherwise
+    /// the reaction deadline (which the daemon considers only while the output is not animated).
+    [[nodiscard]] std::optional<TimePoint> next_wake() const {
+        return next_tick_ ? next_tick_ : model_.reaction_deadline();
+    }
+
+    /// `Daemon::recompute()` (daemon.cpp lines 140-172 when this was written: the job and the
+    /// forget at 147-158, the tick at 161-163), in its order: compose the frame at `now_` with what
+    /// the model knows; when the job is sent, forget the backlight reading if the job is forced or
+    /// changes the backlight (the reading no longer holds once the daemon writes the backlight
+    /// itself); then schedule the next tick. A write is counted when the (backlight, hardware
+    /// zones) key changes: a forced job with the same key rewrites only the backlight. While
+    /// suspended there is no frame and nothing ticks.
     void sample() {
         const std::optional<Inputs> in = model_.inputs(now_);
         if (!in) {
-            animated_ = false;
+            next_tick_.reset();
             return;
         }
         const Output out = compose(*in, std::chrono::duration<double>(now_ - start_).count());
         const std::pair key{out.backlight, model_.config().device.zone_map.to_hw(out.zones)};
-        if (last_ != key) {
-            if (last_) {
+        const bool force = std::exchange(force_backlight_, false);
+        if (force || last_ != key) {
+            if (force || !last_ || last_->first != out.backlight) {
+                model_.forget_hw_backlight();
+            }
+            if (last_ && *last_ != key) {
                 frames_.push_back(out.zones);
                 frame_times_.push_back(now_ - start_);
             }
             last_ = key;
         }
-        animated_ = out.animated;
+        next_tick_ = out.animated ? std::optional(now_ + tick()) : std::nullopt;
     }
 
     Model model_;
     TimePoint start_ = TimePoint{} + std::chrono::hours(1);
     TimePoint now_ = start_;
     std::optional<std::pair<bool, std::array<Rgb, 4>>> last_;
-    bool animated_ = false;
+    /// Set while the last output was animated: when the effect's next tick is due.
+    std::optional<TimePoint> next_tick_;
+    /// The next job must write the backlight.
+    bool force_backlight_ = false;
     std::vector<Frame> frames_;
     std::vector<Duration> frame_times_;
 };

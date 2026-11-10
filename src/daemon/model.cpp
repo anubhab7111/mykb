@@ -238,8 +238,11 @@ void Model::apply_signal(const Signal &s, TimePoint now) {
 }
 
 std::optional<TimePoint> Model::reaction_deadline() const {
-    if (suspended_) {
+    if (suspended_ || !config_.reactions.enabled) {
         return std::nullopt;
+    }
+    if (reactions_.visibility_differs(visibility(rules()))) {
+        return TimePoint{}; // a frame is due now: see the header
     }
     return reactions_.next_change();
 }

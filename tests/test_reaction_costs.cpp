@@ -71,6 +71,14 @@ std::string replaced(std::string_view text, std::string_view from, std::string_v
     return out;
 }
 
+/// `frame` with every zone moved half way toward white, as a window opening lifts it.
+Frame lifted(Frame frame) {
+    for (Rgb &z : frame) {
+        z = Rgb::lerp(z, kWhite, 0.5);
+    }
+    return frame;
+}
+
 /// The frames of one upward sweep over `kBase`: left with wasd, middle, right, then the base.
 std::vector<Frame> sweep_frames() {
     return frames({paint(kBase, {Zone::Left, Zone::Wasd}, kSweep),
@@ -98,6 +106,7 @@ TEST(ReactionCosts, FiveFastSwitchesCostFour) {
     rig.run_for(2s);
     EXPECT_EQ(rig.writes(), 4u) << "switches during a sweep are absorbed";
     EXPECT_EQ(rig.frames(), sweep_frames());
+    EXPECT_EQ(rig.frame_times(), times({0ms, 120ms, 240ms, 360ms}));
 }
 
 TEST(ReactionCosts, WindowOpenOrCloseCostsTwo) {
@@ -105,18 +114,17 @@ TEST(ReactionCosts, WindowOpenOrCloseCostsTwo) {
     open.signal(signal::WindowOpened{});
     open.run_for(2s);
     EXPECT_EQ(open.writes(), 2u);
-    ASSERT_EQ(open.frames().size(), 2u);
-    EXPECT_NE(open.frames()[0], kBase) << "the lift";
-    EXPECT_EQ(open.frames()[1], kBase);
+    EXPECT_EQ(open.frames(), frames({lifted(kBase), kBase})) << "50% toward white, then back";
     EXPECT_EQ(open.frame_times(), times({0ms, 120ms}));
 
     ReactionRig close;
     close.signal(signal::WindowClosed{});
     close.run_for(2s);
     EXPECT_EQ(close.writes(), 2u);
-    ASSERT_EQ(close.frames().size(), 2u);
-    EXPECT_NE(close.frames()[0], kBase) << "the dip";
-    EXPECT_EQ(close.frames()[1], kBase);
+    const Frame dipped{multiply(kL, 0.35), multiply(kM, 0.35), multiply(kR, 0.35),
+                       multiply(kW, 0.35)};
+    EXPECT_EQ(close.frames(), frames({dipped, kBase})) << "down to 35%, then back";
+    EXPECT_EQ(close.frame_times(), times({0ms, 120ms}));
 }
 
 TEST(ReactionCosts, WindowStormCostsAtMostFour) {
@@ -188,6 +196,7 @@ TEST(ReactionCosts, MoreUrgentWindowsAddNothingWhileLit) {
     rig.run_for(2s);
     EXPECT_EQ(rig.writes(), 4u);
     EXPECT_EQ(rig.frames().back(), kBase);
+    EXPECT_EQ(rig.frame_times(), times({0ms, 150ms, 300ms, 6000ms}));
 }
 
 TEST(ReactionCosts, LampHeldForSixtySecondsAddsNothing) {
@@ -201,6 +210,7 @@ TEST(ReactionCosts, LampHeldForSixtySecondsAddsNothing) {
     const Frame lit = paint(kBase, {Zone::Right}, kUrgent);
     const Frame both = paint(lit, {Zone::Wasd}, kWaiting);
     ASSERT_EQ(rig.frames(), frames({lit, kBase, lit, both, lit, both}));
+    ASSERT_EQ(rig.frame_times(), times({0ms, 150ms, 300ms, 2000ms, 2150ms, 2300ms}));
 
     rig.run_for(60s);
     EXPECT_EQ(rig.writes(), 6u);
@@ -220,6 +230,7 @@ TEST(ReactionCosts, ClaudeWaitCostsFourAndFinishCostsTwo) {
     wait.run_for(2s);
     EXPECT_EQ(wait.writes(), 4u);
     EXPECT_EQ(wait.frames().back(), kBase);
+    EXPECT_EQ(wait.frame_times(), times({0ms, 150ms, 300ms, 2000ms}));
 
     ReactionRig finish;
     finish.signal(signal::AgentDone{"s1", std::nullopt});
@@ -236,6 +247,7 @@ TEST(ReactionCosts, ClaudeWaitCostsFourAndFinishCostsTwo) {
     both.run_for(2s);
     EXPECT_EQ(both.writes(), 5u);
     EXPECT_EQ(both.frames(), frames({waiting, kBase, waiting, done, kBase}));
+    EXPECT_EQ(both.frame_times(), times({0ms, 150ms, 300ms, 2000ms, 2150ms}));
 }
 
 TEST(ReactionCosts, ClaudeLampWindowRules) {
@@ -262,6 +274,10 @@ TEST(ReactionCosts, ClaudeLampWindowRules) {
 
     // A session finishing in the focused terminal does not flash.
     EXPECT_EQ(step(signal::AgentDone{"s1", str(kTerm)}), 7u);
+
+    // Each step is 2 s: s2 lights at 4 s, its window's focus clears it at 6 s, s3 lights at 10 s.
+    EXPECT_EQ(rig.frame_times(),
+              times({4000ms, 4150ms, 4300ms, 6000ms, 10000ms, 10150ms, 10300ms}));
 }
 
 // Ruling P7: an agent raise drops the urgent light of its window in the frame that lights WASD.
@@ -365,35 +381,60 @@ TEST(ReactionCosts, ReactionsOnAnAnimatedBaseAddNoWrites) {
     plain.request(req::Profile{"wavy"});
     ReactionRig swept;
     swept.request(req::Profile{"wavy"});
-    swept.signal(signal::WorkspaceSwitched{1, 2}); // delivered with a frame of its own
-
-    const std::size_t plain_before = plain.writes();
-    const std::size_t swept_before = swept.writes();
+    // Ruling P16: while the effect ticks, a signal is applied without a frame of its own (before,
+    // it was delivered with one, the spec's "± 1" of section 6). The next tick samples it.
+    swept.signal(signal::WorkspaceSwitched{1, 2});
     plain.run_for(1s);
     swept.run_for(1s);
 
-    // The effect's own ticks sample the sweep: the second it plays in adds no wake-up and no write.
-    EXPECT_EQ(plain.writes() - plain_before, 10u) << "a cycle frame changes every tick";
-    EXPECT_EQ(swept.writes() - swept_before, plain.writes() - plain_before);
-    EXPECT_EQ(std::vector(swept.frame_times().begin() + static_cast<std::ptrdiff_t>(swept_before),
-                          swept.frame_times().end()),
-              std::vector(plain.frame_times().begin() + static_cast<std::ptrdiff_t>(plain_before),
-                          plain.frame_times().end()));
+    // The switch to `wavy` at 0, then a tick every 100 ms: a cycle frame changes every tick.
+    EXPECT_EQ(plain.writes(), 11u);
+    EXPECT_EQ(swept.writes(), plain.writes());
+    EXPECT_EQ(swept.frame_times(), plain.frame_times());
 
-    // And the ticks show it, each step up to one tick late: left with wasd at the 100 ms tick,
-    // middle at 200, right at 300, gone at 400.
+    // And the ticks show the sweep, each step up to one tick late: left with wasd at the 100 ms
+    // tick, middle at 200, right at 300, gone at 400.
     const std::vector<Frame> &f = swept.frames();
-    ASSERT_GE(f.size(), swept_before + 4);
-    EXPECT_EQ(f[swept_before][index(Zone::Left)], kSweep);
-    EXPECT_EQ(f[swept_before][index(Zone::Wasd)], kSweep);
-    EXPECT_EQ(f[swept_before + 1][index(Zone::Middle)], kSweep);
-    EXPECT_EQ(f[swept_before + 2][index(Zone::Right)], kSweep);
-    for (const Rgb z : f[swept_before + 3]) {
-        EXPECT_NE(z, kSweep);
+    ASSERT_EQ(f.size(), 11u);
+    EXPECT_EQ(f[1][index(Zone::Left)], kSweep);
+    EXPECT_EQ(f[1][index(Zone::Wasd)], kSweep);
+    EXPECT_EQ(f[2][index(Zone::Middle)], kSweep);
+    EXPECT_EQ(f[3][index(Zone::Right)], kSweep);
+    EXPECT_EQ(f[4], plain.frames()[4]);
+}
+
+TEST(ReactionCosts, SignalsBetweenTicksAddNoWrites) {
+    ReactionRig plain;
+    plain.request(req::Profile{"wavy"});
+    plain.run_for(1s);
+    ASSERT_EQ(plain.writes(), 11u) << "the switch to `wavy` at 0, then a tick every 100 ms";
+
+    // 20 window opens 50 ms apart, half of them between two ticks.
+    ReactionRig storm;
+    storm.request(req::Profile{"wavy"});
+    for (int i = 0; i < 20; ++i) {
+        storm.signal(signal::WindowOpened{});
+        storm.run_for(50ms);
+    }
+    EXPECT_EQ(storm.writes(), plain.writes());
+    EXPECT_EQ(storm.frame_times(), plain.frame_times());
+    // The opens at 0 and 500 ms play (the cooldown drops the rest), each seen at the next tick.
+    ASSERT_EQ(storm.frames().size(), 11u);
+    for (std::size_t k = 0; k < 11; ++k) {
+        const bool pulse = k == 1 || k == 6;
+        EXPECT_EQ(storm.frames()[k], pulse ? lifted(plain.frames()[k]) : plain.frames()[k])
+            << "frame " << k;
     }
 
-    // The frame the signal was delivered with is the spec's "± 1" (section 6).
-    EXPECT_LE(swept.writes(), plain.writes() + 1);
+    // 20 focus changes 50 ms apart change nothing anyone sees, and add no write.
+    ReactionRig focus;
+    focus.request(req::Profile{"wavy"});
+    for (int i = 0; i < 20; ++i) {
+        focus.signal(signal::FocusChanged{str(i % 2 == 0 ? kTerm : kOther), "alacritty"});
+        focus.run_for(50ms);
+    }
+    EXPECT_EQ(focus.frames(), plain.frames());
+    EXPECT_EQ(focus.frame_times(), plain.frame_times());
 }
 
 TEST(ReactionCosts, RateLimitCapsAStormOverAMinute) {
@@ -455,4 +496,53 @@ TEST(ReactionCosts, AReloadThatShortensTheTtlClearsTheLampAtTheNewExpiry) {
     EXPECT_EQ(rig.writes(), 4u);
     EXPECT_EQ(rig.frames().back(), kBase);
     EXPECT_EQ(rig.frame_times().back(), 60s) << "cleared at the new expiry, not at the end";
+}
+
+// Ruling P17: a lamp is held while the Fn key has the backlight off; `toggle` or `on` brings the
+// backlight back, and the lamp shows steady in one write, with no other event.
+TEST(ReactionCosts, TheFnKeyThenPowerOnShowsTheHeldLampInOneWrite) {
+    const Frame lit = paint(kBase, {Zone::Right}, kUrgent);
+    for (const req::PowerAction action : {req::PowerAction::Toggle, req::PowerAction::On}) {
+        const bool on = action == req::PowerAction::On;
+        ReactionRig rig;
+        rig.signal(signal::UrgentRaised{"a1"});
+        rig.run_for(2s);
+        ASSERT_EQ(rig.frames(), frames({lit, kBase, lit})) << "on " << on;
+
+        // `toggle` reads the backlight first (`needs_backlight_read`), and so may a probe before
+        // `on`: off, after the Fn key. From then on the lamp is not drawn.
+        rig.set_hw_backlight(false);
+        EXPECT_EQ(rig.frames().back(), kBase) << "on " << on;
+        const std::size_t dark = rig.writes();
+
+        // The forced write is composed with that reading, which the daemon forgets only after it.
+        // The deadline says a frame is due, and that frame shows the lamp.
+        rig.request(req::Power{action});
+        rig.run_for(2s);
+        EXPECT_EQ(rig.writes(), dark + 1) << "on " << on;
+        EXPECT_EQ(rig.frames().back(), lit) << "on " << on;
+        EXPECT_EQ(rig.frame_times().back(), 2000ms) << "on " << on << ": at once, no blink";
+    }
+}
+
+// Ruling P17: the lamps are hidden while the write budget is spent, and come back when a write
+// succeeds again. The daemon recomputes on neither writer outcome: the deadline wakes it.
+TEST(ReactionCosts, ASpentBudgetHidesTheLampsUntilAWriteSucceeds) {
+    const Frame lit = paint(kBase, {Zone::Right}, kUrgent);
+    ReactionRig rig;
+    rig.signal(signal::UrgentRaised{"a1"});
+    rig.run_for(2s);
+    ASSERT_EQ(rig.writes(), 3u);
+
+    rig.model().record_write(std::unexpected(BackendError{BackendError::Kind::Budget, ""}));
+    rig.run_for(1s);
+    // The frame without the lamp is sent at once (the backend refuses it while the budget lasts).
+    EXPECT_EQ(rig.frames().back(), kBase);
+    EXPECT_EQ(rig.frame_times().back(), 2000ms);
+
+    rig.model().record_write(true);
+    rig.run_for(1s);
+    EXPECT_EQ(rig.writes(), 5u);
+    EXPECT_EQ(rig.frames().back(), lit);
+    EXPECT_EQ(rig.frame_times().back(), 3000ms) << "at once, with no other event";
 }
