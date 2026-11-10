@@ -42,7 +42,7 @@ blinks = 2               # (0-5); then steady
 
 [reactions.agent]
 zones = ["wasd"]         # [] turns the lamp off
-waiting = "theme:peach"
+waiting = "theme:peach"  # orange on the keyboard with colors = "vivid"; "#ffb000" is true amber
 done = "theme:green"
 blinks = 2               # (0-5); then steady
 ttl_s = 3600             # (60-86400)
