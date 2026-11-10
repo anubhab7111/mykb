@@ -1,7 +1,10 @@
 #include "sources/hyprland.hpp"
 
+#include "core/window_address.hpp"
+
 #include <algorithm>
 #include <cerrno>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -36,18 +39,71 @@ UniqueFd connect_to(const std::filesystem::path &path) {
     return fd;
 }
 
-} // namespace
+/// The text before the first comma, or all of `s`. Later fields can hold a window title.
+std::string_view before_comma(std::string_view s) { return s.substr(0, s.find(',')); }
 
-std::optional<Event> parse_socket2_line(std::string_view line) {
-    constexpr std::string_view kPrefix = "submap>>";
-    if (!line.starts_with(kPrefix)) {
+/// A whole-text integer: no sign but `-`, no spaces, no trailing text, no overflow.
+std::optional<int> parse_id(std::string_view s) {
+    int id = 0;
+    const auto [stop, ec] = std::from_chars(s.data(), s.data() + s.size(), id);
+    if (ec != std::errc{} || stop != s.data() + s.size()) {
         return std::nullopt;
     }
-    const std::string_view name = line.substr(kPrefix.size());
-    if (name.empty()) {
-        return Event{event::Submap{std::nullopt}};
+    return id;
+}
+
+/// An event that names a window and nothing else we keep; a missing address makes it malformed.
+template <class E> std::optional<HyprEvent> with_address(std::string_view data) {
+    std::string address = normalize_window_address(before_comma(data));
+    if (address.empty()) {
+        return std::nullopt;
     }
-    return Event{event::Submap{std::string(name)}};
+    return HyprEvent{E{std::move(address)}};
+}
+
+} // namespace
+
+std::optional<HyprEvent> parse_socket2_line(std::string_view line) {
+    if (line.size() > kMaxLine) {
+        return std::nullopt;
+    }
+    const std::size_t arrows = line.find(">>");
+    if (arrows == std::string_view::npos) {
+        return std::nullopt;
+    }
+    const std::string_view name = line.substr(0, arrows);
+    const std::string_view data = line.substr(arrows + 2);
+    if (name == "submap") {
+        if (data.empty()) {
+            return HyprEvent{hypr::Submap{std::nullopt}};
+        }
+        return HyprEvent{hypr::Submap{std::string(data)}};
+    }
+    if (name == "workspacev2") {
+        if (const auto id = parse_id(before_comma(data))) {
+            return HyprEvent{hypr::WorkspaceV2{*id}};
+        }
+        return std::nullopt;
+    }
+    if (name == "openwindow") {
+        return with_address<hypr::OpenWindow>(data);
+    }
+    if (name == "closewindow") {
+        return with_address<hypr::CloseWindow>(data);
+    }
+    if (name == "urgent") {
+        return with_address<hypr::Urgent>(data);
+    }
+    if (name == "activewindow") {
+        return HyprEvent{hypr::ActiveWindow{std::string(before_comma(data))}};
+    }
+    if (name == "activewindowv2") {
+        return HyprEvent{hypr::ActiveWindowV2{normalize_window_address(before_comma(data))}};
+    }
+    if (name == "fullscreen" && (data == "0" || data == "1")) {
+        return HyprEvent{hypr::Fullscreen{data == "1"}};
+    }
+    return std::nullopt; // windowtitle, windowtitlev2 and everything else
 }
 
 std::vector<std::filesystem::path> socket2_paths() {
@@ -102,7 +158,9 @@ void HyprlandSource::connect() {
         if (UniqueFd fd = connect_to(path)) {
             failures_ = 0;
             fd_ = std::move(fd);
+            connected_path_ = path;
             loop_.watch(fd_.get(), EPOLLIN, [this](std::uint32_t) { on_readable(); });
+            emit_(hypr::Connected{});
             return;
         }
     }
@@ -139,8 +197,9 @@ void HyprlandSource::on_readable() {
 void HyprlandSource::disconnected() {
     loop_.unwatch(fd_.get());
     fd_.reset();
+    connected_path_.reset();
     lines_ = LineBuffer{};
-    emit_(Event{event::Submap{std::nullopt}});
+    emit_(hypr::Disconnected{});
     retry_later();
 }
 
