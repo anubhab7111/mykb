@@ -62,6 +62,18 @@ Facts facts_from(const ojson &j) {
     return f;
 }
 
+ojson reactions_json(const ReactionsStatus &r) {
+    return ojson{{"enabled", r.enabled}, {"lamps", r.lamps}, {"playing", opt_json(r.playing)}};
+}
+
+ReactionsStatus reactions_from(const ojson &j) {
+    ReactionsStatus r;
+    r.enabled = j.at("enabled").get<bool>();
+    r.lamps = j.at("lamps").get<std::vector<std::string>>();
+    r.playing = opt_get<std::string>(j, "playing");
+    return r;
+}
+
 ojson status_json(const Status &s) {
     return ojson{{"profile", s.profile},
                  {"effect", s.effect},
@@ -78,7 +90,8 @@ ojson status_json(const Status &s) {
                  {"last_error", opt_json(s.last_error)},
                  {"budget_exhausted", s.budget_exhausted},
                  {"lifetime_writes", s.lifetime_writes},
-                 {"warnings", s.warnings}};
+                 {"warnings", s.warnings},
+                 {"reactions", reactions_json(s.reactions)}};
 }
 
 Status status_from(const ojson &j) {
@@ -99,6 +112,9 @@ Status status_from(const ojson &j) {
     s.budget_exhausted = j.at("budget_exhausted").get<bool>();
     s.lifetime_writes = j.at("lifetime_writes").get<std::uint64_t>();
     s.warnings = j.at("warnings").get<std::vector<std::string>>();
+    if (j.contains("reactions")) {
+        s.reactions = reactions_from(j.at("reactions"));
+    }
     return s;
 }
 

@@ -2,6 +2,7 @@
 // CLI ↔ daemon protocol: one JSON object per line. Wire format identical to the Rust prototype
 // (`"cmd"` tag, kebab-case values, field order).
 
+#include "core/reactions_status.hpp"
 #include "core/rules.hpp"
 
 #include <array>
@@ -84,6 +85,8 @@ struct Status {
     bool budget_exhausted = false;
     std::uint64_t lifetime_writes = 0;
     std::vector<std::string> warnings;
+    /// The default (off, nothing lit) when a daemon that predates reactions sent the status.
+    ReactionsStatus reactions;
 
     friend bool operator==(const Status &, const Status &) = default;
 };
