@@ -591,7 +591,8 @@ TEST_F(AgentHook, ClaudeHooksSnippetIsValidJsonWiredToTheSixEvents) {
 }
 
 TEST_F(AgentHook, ReactionsSnippetCarriesTheExampleDefaultsAndTheFullscreenRule) {
-    // Not parsed with the config parser: the fullscreen_app condition arrives in another task.
+    // Text only: this pins the shipped words against the example config. That the snippet parses
+    // and where its rule lands is checked by ReactionsSnippet.* below, with the product parser.
     const std::string snippet = read_file(source_path("packaging/snippets/reactions-config.toml"));
     const std::string example = read_file(source_path("packaging/config.example.toml"));
     EXPECT_TRUE(snippet.starts_with("# omen-kbd: "));
