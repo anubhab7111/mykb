@@ -533,8 +533,10 @@ TEST(ReactionCosts, TheFnKeyThenPowerOnShowsTheHeldLampInOneWrite) {
         rig.run_for(2s);
         ASSERT_EQ(rig.frames(), frames({lit, kBase, lit})) << "on " << on;
 
-        // `toggle` reads the backlight first (`needs_backlight_read`), and so may a probe before
-        // `on`: off, after the Fn key. From then on the lamp is not drawn.
+        // `toggle` reads the backlight first (`needs_backlight_read`); `on` reads nothing, so for
+        // it this stands for an earlier read such as `status` (a static profile has no periodic
+        // probe: those run only while an effect animates). Either way the reading is off, after
+        // the Fn key, and from then on the lamp is not drawn.
         rig.set_hw_backlight(false);
         EXPECT_EQ(rig.frames().back(), kBase) << "on " << on;
         const std::size_t dark = rig.writes();

@@ -85,8 +85,8 @@ class Model {
     ///
     /// `TimePoint{}`, long past, when the visibility changed since the reactions last took it and
     /// no frame followed: the daemon forgets its backlight reading only after composing a forced
-    /// write, and `record_write` clears a spent budget without a frame. The next `inputs` takes
-    /// the new visibility (a held lamp shows or hides at once), and the deadline moves on.
+    /// write, and `record_write` sets or clears a spent budget without a frame. The next `inputs`
+    /// takes the new visibility (a held lamp shows or hides at once), and the deadline moves on.
     [[nodiscard]] std::optional<TimePoint> reaction_deadline() const;
     /// What the firmware reports (e.g. after the Fn backlight key), read at `now`.
     void set_hw_backlight(bool on, TimePoint now) {
