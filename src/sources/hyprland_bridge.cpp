@@ -2,15 +2,27 @@
 
 #include "util/strings.hpp"
 
+#include <chrono>
 #include <utility>
 #include <variant>
 
 namespace omenkbd {
 
+namespace {
+
+using namespace std::chrono_literals;
+
+/// How long after a failed query the one retry asks again (F3).
+constexpr Duration kRetryDelay = 500ms;
+
+} // namespace
+
 HyprlandBridge::HyprlandBridge(EventLoop &loop, HyprlandSource::PathFn path_fn, Emit emit)
-    : emit_(std::move(emit)),
+    : loop_(loop), emit_(std::move(emit)),
       query_(loop, [this](const std::optional<ActiveWindowInfo> &info) { on_query_result(info); }),
       source_(loop, std::move(path_fn), [this](const HyprEvent &ev) { on_hypr(ev); }) {}
+
+HyprlandBridge::~HyprlandBridge() { cancel_retry(); }
 
 void HyprlandBridge::configure(bool reactions_on, bool fullscreen_wanted) {
     const bool switched_on = reactions_on && !reactions_on_;
@@ -30,6 +42,7 @@ void HyprlandBridge::configure(bool reactions_on, bool fullscreen_wanted) {
     if (fullscreen_wanted_) {
         check_fullscreen(); // P21: the check that came with `Connected` was ignored
     } else {
+        cancel_retry();
         query_.cancel(); // a reply that is still on its way must not bring the fact back
         set_fullscreen(std::nullopt);
     }
@@ -37,6 +50,7 @@ void HyprlandBridge::configure(bool reactions_on, bool fullscreen_wanted) {
 
 void HyprlandBridge::on_hypr(const HyprEvent &ev) {
     if (std::holds_alternative<hypr::Disconnected>(ev)) {
+        cancel_retry();
         query_.cancel(); // what a Hyprland that is gone says no longer counts
     }
     for (const TrackerOut &out : tracker_.on(ev)) {
@@ -62,19 +76,42 @@ void HyprlandBridge::deliver(const event::Submap &m) { emit_(Event{m}); }
 void HyprlandBridge::deliver(const CheckFullscreen & /*check*/) { check_fullscreen(); }
 
 void HyprlandBridge::check_fullscreen() {
+    cancel_retry(); // a newer question replaces it
     // Not wanted comes first: `Connected` arrives while `source_` is still being constructed.
     if (!fullscreen_wanted_) {
         return;
     }
+    ask();
+}
+
+void HyprlandBridge::ask() {
     if (const auto &socket2 = source_.connected_path()) {
         query_.request(socket2->parent_path() / ".socket.sock");
     }
 }
 
+void HyprlandBridge::cancel_retry() {
+    if (retry_) {
+        loop_.cancel(*retry_);
+        retry_.reset();
+    }
+    retrying_ = false;
+}
+
 void HyprlandBridge::on_query_result(const std::optional<ActiveWindowInfo> &info) {
     if (!info) {
-        return; // the query failed: keep what we know
+        // The query failed: keep what we know. If that is "dimmed", one failure must not keep the
+        // keyboard dimmed until the next event, so ask once more; a retry that fails stops here.
+        if (fullscreen_ && !std::exchange(retrying_, false)) {
+            retry_ = loop_.at(Clock::now() + kRetryDelay, [this] {
+                retry_.reset();
+                retrying_ = true;
+                ask();
+            });
+        }
+        return;
     }
+    retrying_ = false;
     if (is_true_fullscreen(info->fullscreen)) {
         set_fullscreen(to_lower(info->app_class)); // rules compare lowercased classes
     } else {
