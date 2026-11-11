@@ -114,8 +114,9 @@ std::expected<void, std::string> read_zones(const toml::table &t, std::string_vi
         const auto text = z.value<std::string>();
         const auto zone = text ? zone_from_name(*text) : std::nullopt;
         if (!zone) {
-            return Err(std::format("{}: unknown zone {} (expected left, middle, right or wasd)",
-                                   where, text ? "\"" + *text + "\"" : std::string("value")));
+            return Err(
+                std::format("{}: `{}`: unknown zone {} (expected left, middle, right or wasd)",
+                            where, key, text ? "\"" + *text + "\"" : std::string("value")));
         }
         zones.push_back(*zone);
     }
@@ -158,6 +159,26 @@ std::expected<void, std::string> parse_window(const toml::table &t, ReactionsCfg
     return {};
 }
 
+/// The whole dotted key when `node` is the table an unquoted `com.example.app = ...` was split
+/// into (TOML reads that line as the tables com -> example -> app; with several keys under one
+/// prefix, the first in key order), otherwise "". Such a table starts exactly where its key does,
+/// which an inline table and a `[apps.zapzap]` header, also tables, do not.
+std::string unquoted_dotted_key(const toml::key &key, const toml::node &node) {
+    const toml::table *tbl = node.as_table();
+    if (tbl == nullptr || tbl->is_inline() || tbl->source().begin != key.source().begin) {
+        return {};
+    }
+    std::string dotted(key.str());
+    while (tbl != nullptr && !tbl->empty()) {
+        const auto first = tbl->begin(); // `*tbl->begin()` would refer into a dead iterator
+        const auto &[part, child] = *first;
+        dotted += '.';
+        dotted += part.str();
+        tbl = child.as_table();
+    }
+    return dotted;
+}
+
 /// `[reactions.notify.apps]`: app name => color. Keys are lowercased, and two keys that collide
 /// after that are an error rather than a silent last-one-wins.
 std::expected<std::map<std::string, ColorRef, std::less<>>, std::string>
@@ -165,6 +186,10 @@ parse_apps(const toml::table &t) {
     constexpr std::string_view where = "reactions.notify.apps";
     std::map<std::string, ColorRef, std::less<>> apps;
     for (const auto &[key, node] : t) {
+        if (const std::string dotted = unquoted_dotted_key(key, node); !dotted.empty()) {
+            return Err(std::format("{}: key `{}` contains dots and must be quoted: \"{}\" = ...",
+                                   where, dotted, dotted));
+        }
         const auto s = node.value<std::string>();
         if (!s) {
             return Err(std::format("{}.{} must be a color string", where, key.str()));

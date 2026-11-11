@@ -312,6 +312,24 @@ TEST(Model, FullscreenFactSelectsTheCap) {
     EXPECT_EQ(in(m).brightness, 100);
 }
 
+// `Facts::fullscreen_app` is documented as lowercase and the rules compare it with the lowercased
+// classes of a rule, so the model enforces that at the one place a fact enters.
+TEST(Model, FullscreenFactIsLowercasedWhereItEntersTheModel) {
+    Model m = model();
+    m.apply_fact(fact::FullscreenApp{"MPV"});
+    EXPECT_EQ(in(m).brightness, 15) << "the rule lists mpv";
+    EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, "mpv");
+    EXPECT_EQ(m.status(nullptr).active_rules, std::vector<std::string>{"fullscreen video dims"});
+
+    m.apply_fact(fact::FullscreenApp{"FireFox"});
+    EXPECT_EQ(in(m).brightness, 15) << "firefox is listed too";
+    EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, "firefox");
+
+    m.apply_fact(fact::FullscreenApp{"Kitty"});
+    EXPECT_EQ(in(m).brightness, 100) << "a mixed-case class that is not listed";
+    EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, "kitty");
+}
+
 TEST(Model, UnknownThemeColorWarnsAndUsesWhite) {
     Config cfg = parse_config("[[profiles]]\nname = 'x'\ncolors = ['theme:nope', '#000000', "
                               "'#000000', '#000000']\n")
