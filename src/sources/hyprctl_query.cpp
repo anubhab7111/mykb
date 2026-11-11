@@ -2,6 +2,7 @@
 
 #include "core/window_address.hpp"
 #include "ipc/socket.hpp"
+#include "util/utf8.hpp"
 
 #include <cerrno>
 #include <climits>
@@ -25,6 +26,11 @@ constexpr Duration kTimeout = 300ms;
 /// A window's JSON is well under 1 KiB; anything this large is not Hyprland answering.
 constexpr std::size_t kMaxReply = std::size_t{64} * 1024;
 constexpr std::string_view kCommand = "j/activewindow";
+
+/// The reply as a document, or a discarded value when it is not JSON. A title can hold bytes that
+/// are not UTF-8, and nlohmann refuses the whole document for one, so they are replaced first
+/// (T15-1): the title is not read, and the rest of the answer must not be lost to it.
+json parse_reply(std::string_view reply) { return json::parse(scrub_utf8(reply), nullptr, false); }
 
 /// The string at `key`, or nullopt when it is missing or not a string.
 std::optional<std::string> string_at(const json &obj, const char *key) {
@@ -60,7 +66,7 @@ std::optional<ActiveWindowInfo> window_from(const json &doc) {
 /// answers `{}`), nullopt for anything else. An empty reply is not "nothing focused", it is a
 /// hiccup (P23): it parses to nothing and so fails.
 std::optional<ActiveWindowInfo> interpret(std::string_view reply) {
-    const json doc = json::parse(reply, nullptr, false);
+    const json doc = parse_reply(reply);
     if (doc.is_object() && doc.empty()) {
         return ActiveWindowInfo{};
     }
@@ -70,7 +76,7 @@ std::optional<ActiveWindowInfo> interpret(std::string_view reply) {
 } // namespace
 
 std::optional<ActiveWindowInfo> parse_active_window(std::string_view json_text) {
-    return window_from(json::parse(json_text, nullptr, false));
+    return window_from(parse_reply(json_text));
 }
 
 HyprctlQuery::HyprctlQuery(EventLoop &loop, Result on_result)

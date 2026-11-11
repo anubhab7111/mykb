@@ -29,10 +29,12 @@ struct ActiveWindowInfo {
 constexpr bool is_true_fullscreen(int mode) { return (static_cast<unsigned>(mode) & 2U) != 0; }
 
 /// The JSON that `j/activewindow` returns for a window ⇒ its address, class and fullscreen mode.
-/// Pure. nullopt for `{}` (nothing focused), for anything that is not a JSON object with a string
-/// `address` that is a valid window address (see `normalize_window_address`), a string `class` and
-/// a non-negative integer
-/// `fullscreen`, and for garbage; never throws. Other fields, the title among them, are ignored.
+/// Pure. Bytes that are not UTF-8 (a title can hold them) are replaced before parsing, so they
+/// cannot cost the answer; outside a string they still make the reply garbage. nullopt for `{}`
+/// (nothing focused), for anything that is not a JSON object with a string `address` that is a
+/// valid window address (see `normalize_window_address`), a string `class` and a non-negative
+/// integer `fullscreen`, and for garbage; never throws. Other fields, the title among them, are
+/// ignored.
 std::optional<ActiveWindowInfo> parse_active_window(std::string_view json);
 
 /// Asks `j/activewindow` on a request socket and reports what came back. Writes the command and
