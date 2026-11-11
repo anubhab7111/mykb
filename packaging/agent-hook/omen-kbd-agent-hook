@@ -81,7 +81,7 @@ find_window() {
     local proc=${OMEN_KBD_PROC:-/proc}
     local want=${OMEN_KBD_AGENT_COMM:-claude}
     local hyprctl=${OMEN_KBD_HYPRCTL:-hyprctl}
-    local address_re='^0x[0-9a-fA-F]+$'
+    local address_re='^0x[0-9a-fA-F]{1,64}$' # omen-kbd refuses more than 64 digits
     local pid=${OMEN_KBD_START_PID:-$PPID}
     local seen=" " state=seek stat comm ppid i json
     local -a chain=()
