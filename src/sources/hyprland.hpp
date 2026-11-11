@@ -113,6 +113,8 @@ class HyprlandSource {
     UniqueFd fd_;
     std::optional<std::filesystem::path> connected_path_;
     LineBuffer lines_;
+    /// A line grew past 64 KiB and was dropped: drop what follows up to and including its newline.
+    bool discarding_ = false;
     int failures_ = 0;
     std::optional<EventLoop::TimerId> retry_;
 };

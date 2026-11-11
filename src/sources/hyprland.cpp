@@ -158,14 +158,25 @@ void HyprlandSource::on_readable() {
     for (;;) {
         const ssize_t n = ::read(fd_.get(), buf, sizeof(buf));
         if (n > 0) {
-            lines_.append({buf, static_cast<std::size_t>(n)});
+            std::string_view data(buf, static_cast<std::size_t>(n));
+            if (discarding_) {
+                const std::size_t newline = data.find('\n');
+                if (newline == std::string_view::npos) {
+                    continue; // still inside the oversized line
+                }
+                data.remove_prefix(newline + 1);
+                discarding_ = false;
+            }
+            lines_.append(data);
             while (auto line = lines_.next_line()) {
                 if (auto ev = parse_socket2_line(*line)) {
                     emit_(*ev);
                 }
             }
             if (lines_.pending() > kMaxLine) {
+                // Drop the rest of this line too: its tail is not a line (T14-2).
                 lines_ = LineBuffer{};
+                discarding_ = true;
             }
             continue;
         }
@@ -185,6 +196,7 @@ void HyprlandSource::disconnected() {
     fd_.reset();
     connected_path_.reset();
     lines_ = LineBuffer{};
+    discarding_ = false;
     emit_(hypr::Disconnected{});
     retry_later();
 }

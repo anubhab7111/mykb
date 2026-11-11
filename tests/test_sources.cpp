@@ -259,6 +259,39 @@ TEST(Hyprland, TriesEachSocket2CandidateUntilOneAccepts) {
     EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::Submap{"resize"}}));
 }
 
+// T14-2 and F4: past 64 KiB without a newline the buffer is dropped, and so is the rest of that
+// line: its tail is not a line of its own. Without that, a tail that reads like `urgent>>abc`
+// would raise an urgent key that nothing ever clears.
+TEST(Hyprland, TheTailOfAnOversizedLineIsNotALine) {
+    TempDir d;
+    const fs::path path = d.path() / ".socket2.sock";
+    auto listener = bind_socket(path);
+    ASSERT_TRUE(listener.has_value()) << listener.error().message();
+    EventLoop loop;
+    HyprEvents events;
+    HyprlandSource src(loop, [path] { return std::vector{path}; }, events.sink());
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+
+    // One byte over the limit, so the reader drops exactly this much and holds nothing back.
+    const std::string head(std::size_t{64} * 1024 + 1, 'x');
+    std::string_view rest = head;
+    while (!rest.empty()) {
+        const ssize_t n = ::write(conn.get(), rest.data(), rest.size());
+        ASSERT_GT(n, 0);
+        rest.remove_prefix(static_cast<std::size_t>(n));
+    }
+    std::this_thread::sleep_for(200ms); // the reader drains it and starts discarding
+
+    const std::string lines = "urgent>>abc\nsubmap>>resize\n";
+    ASSERT_EQ(::write(conn.get(), lines.data(), lines.size()), static_cast<ssize_t>(lines.size()));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    std::this_thread::sleep_for(50ms);
+    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::Submap{"resize"}}))
+        << "only the line after the oversized one is an event";
+}
+
 TEST(Hyprland, Socket2CandidatesPutTheSignatureFirstThenTheNewest) {
     TempDir rt;
     const auto sock = [&rt](std::string_view sig) {
