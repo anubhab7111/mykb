@@ -170,8 +170,14 @@ void Daemon::deliver_signal(const Signal &s) {
 }
 
 void Daemon::flush_pending_signals() {
+    if (apply_pending_signals()) {
+        show_reactions();
+    }
+}
+
+bool Daemon::apply_pending_signals() {
     if (pending_signals_.empty()) {
-        return;
+        return false;
     }
     // One `now` for all, not each arrival time: frames composed since then have already moved the
     // reactions past it.
@@ -179,7 +185,7 @@ void Daemon::flush_pending_signals() {
     for (const PendingSignal &p : std::exchange(pending_signals_, {})) {
         model_.apply_signal(p.signal, now);
     }
-    show_reactions();
+    return true;
 }
 
 void Daemon::show_reactions() {
@@ -408,6 +414,10 @@ void Daemon::on_request(std::uint64_t id, Client &c, const Request &r, bool back
         }
         Palette p = palette ? std::move(*palette) : Palette(model_.palette());
         model_.replace_config(std::move(*config), std::move(p));
+        if (!model_.config().reactions.enabled) {
+            // R4: off means not even a read, so no read is asked again for these.
+            pending_signals_.clear();
+        }
         if (on_config_replaced_) {
             on_config_replaced_(model_.config());
         }
@@ -498,13 +508,16 @@ void Daemon::on_writer() {
                 continue;
             }
             if (probe.result) {
+                // The reading and the signals that waited for it show in one frame: a recompute
+                // for the reading alone would write the held lamps, then the new clip over them.
                 model_.set_hw_backlight(*probe.result, Clock::now());
+                apply_pending_signals();
                 recompute();
             }
             // A failed probe is not actionable: waiters and waiting signals go on with what the
             // daemon knows, and the next periodic probe retries.
             release_probe_waiters();
-            flush_pending_signals();
+            flush_pending_signals(); // only after a failed probe are any left
         }
     }
 }

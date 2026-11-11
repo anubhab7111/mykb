@@ -95,6 +95,9 @@ class Daemon {
     void deliver_signal(const Signal &s);
     /// Applies the waiting signals in order, then shows them in one frame.
     void flush_pending_signals();
+    /// Applies the waiting signals in order and empties the list, with no frame. False if none
+    /// waited.
+    bool apply_pending_signals();
     /// Shows what a signal changed: at once, unless an effect ticks (Ruling P16), whose next tick
     /// samples the reactions, so a signal adds no write of its own.
     void show_reactions();
