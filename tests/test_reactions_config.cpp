@@ -290,10 +290,10 @@ ttl_s = 86400
 
 TEST(ReactionsConfig, ZonesColorsAndUrgencyAreValidated) {
     const std::pair<std::string_view, std::string_view> cases[] = {
-        {"[reactions.urgent]\nzones = ['top']", "reactions.urgent: unknown zone \"top\""},
+        {"[reactions.urgent]\nzones = ['top']", "reactions.urgent: `zones`: unknown zone \"top\""},
         {"[reactions.agent]\nzones = ['wasd', 'bottom']",
-         "reactions.agent: unknown zone \"bottom\""},
-        {"[reactions.urgent]\nzones = [1]", "reactions.urgent: unknown zone value"},
+         "reactions.agent: `zones`: unknown zone \"bottom\""},
+        {"[reactions.urgent]\nzones = [1]", "reactions.urgent: `zones`: unknown zone value"},
         {"[reactions.agent]\nzones = 'wasd'", "reactions.agent: `zones` must be a list"},
         {"[reactions.workspace]\ncolor = 'nope'", "reactions.workspace: `color`: invalid color"},
         {"[reactions.workspace]\ncolor = 7", "reactions.workspace: `color` must be a string"},
@@ -344,6 +344,23 @@ TEST(ReactionsConfig, ZonesColorsAndUrgencyAreValidated) {
               WasdWith::Middle);
 }
 
+TEST(ReactionsConfig, ZoneErrorsNameTheZonesKeyLikeTheOtherFields) {
+    constexpr std::string_view tail = " (expected left, middle, right or wasd)";
+    const std::pair<std::string_view, std::string> cases[] = {
+        {"[reactions.urgent]\nzones = ['top']",
+         "reactions.urgent: `zones`: unknown zone \"top\"" + std::string(tail)},
+        {"[reactions.agent]\nzones = ['wasd', 'bottom']",
+         "reactions.agent: `zones`: unknown zone \"bottom\"" + std::string(tail)},
+        {"[reactions.urgent]\nzones = [1]",
+         "reactions.urgent: `zones`: unknown zone value" + std::string(tail)},
+    };
+    for (const auto &[snippet, expected] : cases) {
+        const auto c = parse(snippet);
+        ASSERT_FALSE(c.has_value()) << snippet;
+        EXPECT_EQ(c.error(), expected) << snippet;
+    }
+}
+
 TEST(ReactionsConfig, NotifyAppKeysAreLowercased) {
     const ReactionsCfg r = reactions_of(
         "[reactions.notify]\napps = { ZapZap = \"theme:green\", \"Com.Example.App\" = '#010203' }");
@@ -364,6 +381,36 @@ TEST(ReactionsConfig, AppKeysThatCollideAfterLowercasingAreRejected) {
     const auto c = parse("[reactions.notify.apps]\nZapZap = 'theme:green'\nzapzap = '#000000'");
     ASSERT_FALSE(c.has_value());
     EXPECT_EQ(c.error(), "reactions.notify.apps: duplicate app `zapzap`");
+}
+
+TEST(ReactionsConfig, AnUnquotedDottedAppKeyIsToldToBeQuoted) {
+    // TOML reads `com.example.app = ...` as the nested tables com -> example -> app, which used to
+    // surface as "reactions.notify.apps.com must be a color string".
+    const auto dotted = parse("[reactions.notify.apps]\ncom.example.app = 'theme:blue'");
+    ASSERT_FALSE(dotted.has_value());
+    EXPECT_EQ(dotted.error(), "reactions.notify.apps: key `com.example.app` contains dots and "
+                              "must be quoted: \"com.example.app\" = ...");
+
+    // Two keys under one dotted prefix still give a concrete hint: the first in key order.
+    const auto two =
+        parse("[reactions.notify.apps]\norg.a.two = '#000000'\norg.a.one = 'theme:blue'");
+    ASSERT_FALSE(two.has_value());
+    EXPECT_EQ(two.error(), "reactions.notify.apps: key `org.a.one` contains dots and must be "
+                           "quoted: \"org.a.one\" = ...");
+
+    // An inline table and a `[...apps.zapzap]` header are tables too but hold no dotted key, so
+    // the plain message stays for them.
+    const auto inline_table = parse("[reactions.notify.apps]\nzapzap = { color = 'theme:blue' }");
+    ASSERT_FALSE(inline_table.has_value());
+    EXPECT_EQ(inline_table.error(), "reactions.notify.apps.zapzap must be a color string");
+    const auto header = parse("[reactions.notify.apps.zapzap]\ncolor = 'theme:blue'");
+    ASSERT_FALSE(header.has_value());
+    EXPECT_EQ(header.error(), "reactions.notify.apps.zapzap must be a color string");
+
+    // The quoted form is the fix, and it keeps working.
+    const ReactionsCfg quoted =
+        reactions_of("[reactions.notify.apps]\n\"com.example.app\" = 'theme:blue'");
+    EXPECT_EQ(quoted.notify.apps.at("com.example.app").to_string(), "theme:blue");
 }
 
 TEST(ReactionsConfig, TheShippedExampleBlockMatchesTheDefaults) {

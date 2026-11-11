@@ -223,7 +223,10 @@ void Model::apply_fact(const FactUpdate &f) {
             } else if constexpr (std::is_same_v<T, fact::LidClosed>) {
                 lid_closed_ = v.v;
             } else if constexpr (std::is_same_v<T, fact::FullscreenApp>) {
-                facts_.fullscreen_app = v.v;
+                // Lowercased here, where the fact enters: `Facts::fullscreen_app` is documented
+                // lowercase and the rules compare it with their own lowercased classes.
+                facts_.fullscreen_app =
+                    v.v.transform([](const std::string &app) { return to_lower(app); });
             }
         },
         f);
