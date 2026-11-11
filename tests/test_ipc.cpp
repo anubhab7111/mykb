@@ -209,20 +209,26 @@ TEST(Ipc, ToSignalMapsAnEmptyWindowToNone) {
 }
 
 // T14-5 and T12-2: a window that is given but is not 1 to 64 hex digits (after an optional `0x`)
-// is an error, for every state, so a typo never becomes a lamp nobody can dismiss by focus.
+// is an error for the states that use it, so a typo never becomes a lamp nobody can dismiss by
+// focus. `working` and `end` carry no window: a bad one is ignored there (review of the minors,
+// Minor 1), so a wrapper that always adds `--window` can still clear a lamp.
 TEST(Ipc, ToSignalRejectsAnInvalidWindow) {
     const std::string hex64(64, 'a');
     EXPECT_EQ(signal_of(agent_request("waiting", "0x" + hex64)),
               (Signal{signal::AgentWaiting{"s", hex64}}))
         << "64 digits is the longest address";
-    for (const char *state : {"waiting", "working", "done", "end"}) {
-        for (const std::string &bad :
-             {std::string("0x"), std::string("0X"), std::string("zz"), std::string("w1"),
-              std::string("0x0xab"), std::string("0xab "), std::string(65, 'a')}) {
+    for (const std::string &bad :
+         {std::string("0x"), std::string("0X"), std::string("zz"), std::string("w1"),
+          std::string("0x0xab"), std::string("0xab "), std::string(65, 'a')}) {
+        for (const char *state : {"waiting", "done"}) {
             const std::string error = signal_error_of(agent_request(state, bad));
             EXPECT_NE(error.find("invalid window address"), std::string::npos)
                 << state << " \"" << bad << "\": " << error;
         }
+        EXPECT_EQ(signal_of(agent_request("working", bad)), (Signal{signal::AgentWorking{"s"}}))
+            << "working ignores the window: \"" << bad << '"';
+        EXPECT_EQ(signal_of(agent_request("end", bad)), (Signal{signal::AgentEnded{"s"}}))
+            << "end ignores the window: \"" << bad << '"';
     }
     // A bad state keeps its own error.
     EXPECT_NE(signal_error_of(agent_request("sleeping", "zz")).find("sleeping"), std::string::npos);

@@ -265,6 +265,14 @@ std::optional<std::expected<Signal, std::string>> to_signal(const Request &r) {
             return Result(std::unexpect, std::format("session id must be 1 to {} bytes, got {}",
                                                      kMaxSessionBytes, a->session.size()));
         }
+        if (a->state == "working") {
+            return Result(signal::AgentWorking{a->session});
+        }
+        if (a->state == "end") {
+            return Result(signal::AgentEnded{a->session}); // no window to check or use
+        }
+        // Only `waiting` and `done` use a window, so only they refuse a bad one: a sender that
+        // always adds `--window` must still be able to clear a lamp with `working` or `end`.
         auto window = normalized_window(a->window);
         if (!window) {
             return Result(std::unexpect, std::move(window.error()));
@@ -272,13 +280,7 @@ std::optional<std::expected<Signal, std::string>> to_signal(const Request &r) {
         if (a->state == "waiting") {
             return Result(signal::AgentWaiting{a->session, std::move(*window)});
         }
-        if (a->state == "working") {
-            return Result(signal::AgentWorking{a->session});
-        }
-        if (a->state == "done") {
-            return Result(signal::AgentDone{a->session, std::move(*window)});
-        }
-        return Result(signal::AgentEnded{a->session});
+        return Result(signal::AgentDone{a->session, std::move(*window)});
     }
     return std::nullopt;
 }
