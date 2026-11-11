@@ -2,6 +2,8 @@
 // The hook runs under `env -i` with a fake omen-kbd, a fake hyprctl and a fake /proc tree, so the
 // real daemon, the real compositor and this machine's process tree are never involved.
 
+#include "config.hpp"
+#include "core/rules.hpp"
 #include "helpers.hpp"
 
 #include <gtest/gtest.h>
@@ -13,6 +15,7 @@
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/wait.h>
 #include <thread>
 #include <utility>
@@ -607,6 +610,96 @@ TEST_F(AgentHook, ReactionsSnippetCarriesTheExampleDefaultsAndTheFullscreenRule)
                            "\"chromium\"] }\nbrightness_cap = 15\n"),
               std::string::npos);
     EXPECT_GT(rule, snippet.find(block)) << "the rule follows the tables";
+}
+
+// The user pastes the snippet into a config shaped like this one (the example config's layout),
+// just before "power saver dims". It is parsed here by the product parser, so a syntax slip, a key
+// the parser rejects, or an order that lets "power saver dims" win would fail a test and not
+// only the user's `omen-kbd reload`.
+TEST(ReactionsSnippet, ParsesInAUsersConfigAndTheFullscreenCapBeatsPowerSaver) {
+    constexpr std::string_view before_snippet = R"(
+[device]
+zone_map = { left = 2, middle = 1, right = 0, wasd = 3 }
+
+[effects]
+enabled = false
+fps = 10
+
+[theme]
+colors = "vivid"
+dir = "~/.config/theming/current"
+
+[gates]
+on_lock = "off"
+on_idle = "dim"
+dim_brightness = 20
+pause_effects_on_battery = true
+
+[hints]
+timeout_s = 15
+delay_ms = 250
+[hints.modifiers]
+super = "theme:mauve"
+"super+shift" = "theme:blue"
+ctrl = "theme:peach"
+[hints.submaps]
+resize = "theme:teal"
+
+[[profiles]]
+name = "default"
+colors = ["theme:mauve", "theme:blue", "theme:teal", "theme:peach"]
+
+[[profiles]]
+name = "game"
+colors = ["#202020", "#202020", "#202020", "#ff0000"]
+
+[[rules]]
+name = "gamemode"
+when = { gamemode = true }
+profile = "game"
+
+)";
+    constexpr std::string_view after_snippet = R"(
+[[rules]]
+name = "power saver dims"
+when = { power_profile = "power-saver" }
+brightness_cap = 40
+
+[[rules]]
+name = "low battery"
+when = { on_battery = true, battery_below = 15 }
+overlay = { zones = ["right"], color = "#ff0000", pulse = true }
+)";
+    const std::string snippet = read_file(source_path("packaging/snippets/reactions-config.toml"));
+    ASSERT_FALSE(snippet.empty());
+
+    const auto cfg =
+        parse_config(std::string(before_snippet) + snippet + std::string(after_snippet));
+    ASSERT_TRUE(cfg.has_value()) << cfg.error();
+    EXPECT_TRUE(cfg->reactions.enabled);
+    EXPECT_TRUE(cfg->needs_fullscreen()) << "the fullscreen query only runs for such a rule";
+
+    std::vector<std::string> names;
+    for (const Rule &r : cfg->rules) {
+        names.push_back(r.name);
+    }
+    EXPECT_EQ(names, (std::vector<std::string>{"gamemode", "fullscreen video dims",
+                                               "power saver dims", "low battery"}));
+
+    Facts both;
+    both.fullscreen_app = "mpv";
+    both.power_profile = "power-saver";
+    const RuleOutcome out = evaluate(cfg->rules, both);
+    EXPECT_EQ(out.brightness_cap, 15) << "rules are first-match: the fullscreen cap, not 40";
+    EXPECT_EQ(out.active, (std::vector<std::string>{"fullscreen video dims"}));
+
+    // Each rule on its own still caps as written, so the 15 above is the order, not a typo.
+    Facts saver_only;
+    saver_only.power_profile = "power-saver";
+    EXPECT_EQ(evaluate(cfg->rules, saver_only).brightness_cap, 40);
+    Facts video_only;
+    video_only.fullscreen_app = "mpv";
+    EXPECT_EQ(evaluate(cfg->rules, video_only).brightness_cap, 15);
 }
 
 TEST_F(AgentHook, NotifySnippetPassesShellcheck) {
