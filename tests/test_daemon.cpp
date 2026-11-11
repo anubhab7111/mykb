@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <ctime>
 #include <future>
@@ -847,11 +848,19 @@ TEST_F(DaemonTest, SignalsOnARunningEffectAddNoWrites) {
         }
         std::this_thread::sleep_for(25ms);
     }
-    const auto n = zone_writes().size() - a;
+    const auto window = zone_writes_since(a);
+    const auto n = window.size();
     // The effect's own 10 ticks a second (as in EffectTicksAtConfiguredFps), plus the frame of a
     // periodic backlight probe; a frame per signal would add about 40.
     EXPECT_LE(n, 13u) << n << " writes in 1 s at 10 fps with about 40 signals";
     EXPECT_GE(n, 5u) << n << " writes in 1 s at 10 fps";
+    // The ticks did sample the signals: the effect alone never goes above #404040, while a 120 ms
+    // pulse (one every 500 ms) lifts every zone half way to white, and at 10 fps a tick lands in
+    // it.
+    const auto lifted_zone = [](Rgb z) { return z.r >= 0x80 && z.g >= 0x80 && z.b >= 0x80; };
+    EXPECT_TRUE(std::ranges::any_of(window, [&](const std::array<Rgb, 4> &zones) {
+        return std::ranges::all_of(zones, lifted_zone);
+    })) << "no tick in the window showed a window-open pulse";
 }
 
 // Ruling P17: a lamp is held while the Fn key has the backlight off; `toggle` brings the light
