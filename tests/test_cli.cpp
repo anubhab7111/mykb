@@ -177,8 +177,18 @@ TEST(Cli, FormatStatusHasPinnedLabels) {
 namespace {
 
 /// Runs the real `cli_main` on `omen-kbd <args...>` and returns its exit code. Only for command
-/// lines that fail to parse: a valid request would connect to the user's daemon socket.
+/// lines that fail to parse: a valid request would connect to the user's daemon socket. So a line
+/// that does parse is not run at all: the result is -1 (never a real exit code) and `stderr_text`
+/// says why. A validator that regressed then fails the test instead of reaching the real daemon.
 int exit_code_of(std::vector<std::string> args, std::string *stderr_text) {
+    std::vector<const char *> raw;
+    for (const auto &a : args) {
+        raw.push_back(a.c_str());
+    }
+    if (parse(raw).first.has_value()) {
+        *stderr_text = "exit_code_of: these arguments parse, so cli_main would contact the daemon";
+        return -1;
+    }
     args.insert(args.begin(), "omen-kbd");
     std::vector<char *> argv;
     for (auto &a : args) {
