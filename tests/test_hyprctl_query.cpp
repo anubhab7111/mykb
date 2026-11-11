@@ -5,6 +5,7 @@
 #include "helpers.hpp"
 
 #include "sources/hyprctl_query.hpp"
+#include "util/utf8.hpp"
 
 #include <gtest/gtest.h>
 
@@ -166,6 +167,70 @@ TEST(HyprctlQuery, AnInvalidAddressIsAFailedAnswer) {
           std::string(" 0xab"), std::string(65, 'a')}) {
         EXPECT_EQ(parse_active_window(reply(bad)), std::nullopt) << bad;
     }
+}
+
+// T15-1: a title that is not valid UTF-8 must not cost the answer (the exit from fullscreen would
+// go unseen while that title lasts). Invalid bytes are replaced before parsing; a reply that is
+// not JSON still fails (P23).
+TEST(HyprctlQuery, InvalidUtf8InTheTitleDoesNotLoseTheAnswer) {
+    const std::vector<std::string> titles{
+        "\xFF",             // never in UTF-8
+        "caf\xC3",          // cut off
+        "\xC0\xAF",         // overlong
+        "\xED\xA0\x80",     // a surrogate
+        "\xF4\x90\x80\x80", // past U+10FFFF
+        "a\x80z",           // a lone continuation byte
+    };
+    for (const std::string &title : titles) {
+        const std::string reply =
+            R"({"address":"0xab","class":"mpv","title":")" + title + R"(","fullscreen":2})";
+        EXPECT_EQ(parse_active_window(reply), (ActiveWindowInfo{"ab", "mpv", 2})) << reply;
+    }
+    EXPECT_EQ(parse_active_window("{\"address\":\"0xab\",\xFF\"class\":\"mpv\",\"fullscreen\":2}"),
+              std::nullopt)
+        << "an invalid byte outside a string is still not JSON";
+    EXPECT_EQ(parse_active_window("\xFF"), std::nullopt);
+    // Valid multi-byte text is left alone.
+    EXPECT_EQ(parse_active_window(R"({"address":"0xab","class":"caf)"
+                                  "\xC3\xA9\xE2\x82\xAC\xF0\x9F\x8E\xAC"
+                                  R"(","fullscreen":0})"),
+              (ActiveWindowInfo{"ab", "caf\xC3\xA9\xE2\x82\xAC\xF0\x9F\x8E\xAC", 0}));
+}
+
+// The helper behind it: each ill-formed piece becomes one U+FFFD, valid text is left alone.
+TEST(HyprctlQuery, ScrubUtf8ReplacesOnlyIllFormedSequences) {
+    const std::string fffd = "\xEF\xBF\xBD";
+    const std::string valid =
+        "ascii \xC3\xA9 \xE2\x82\xAC \xED\x9F\xBF \xEF\xBF\xBF \xF0\x9F\x8E\xAC "
+        "\xF4\x8F\xBF\xBF";
+    EXPECT_EQ(scrub_utf8(valid), valid);
+    EXPECT_EQ(scrub_utf8(""), "");
+    EXPECT_EQ(scrub_utf8(std::string("a\0b", 3)), std::string("a\0b", 3)) << "NUL is valid UTF-8";
+    EXPECT_EQ(scrub_utf8("\xFF"), fffd);
+    EXPECT_EQ(scrub_utf8("\x80"), fffd);
+    EXPECT_EQ(scrub_utf8("\xC0\xAF"), fffd + fffd) << "C0 is never a lead";
+    EXPECT_EQ(scrub_utf8("\xE0\x80\x80"), fffd + fffd + fffd) << "overlong";
+    EXPECT_EQ(scrub_utf8("\xED\xA0\x80"), fffd + fffd + fffd) << "a surrogate";
+    EXPECT_EQ(scrub_utf8("\xF4\x90\x80\x80"), fffd + fffd + fffd + fffd) << "past U+10FFFF";
+    EXPECT_EQ(scrub_utf8("\xE2\x82"), fffd) << "cut off: one replacement for the piece";
+    EXPECT_EQ(scrub_utf8("\xE2\x82z"), fffd + "z");
+    EXPECT_EQ(scrub_utf8("caf\xC3"), "caf" + fffd);
+    EXPECT_EQ(scrub_utf8("\xF0\x9F\x8E"), fffd);
+}
+
+// The same through the query itself, which parses its reply on its own path.
+TEST(HyprctlQuery, AReplyWithAnInvalidUtf8TitleIsStillAnAnswer) {
+    Rig rig;
+    rig.server.reply_with(R"({"address":"0xab","class":"mpv","title":"bad )"
+                          "\xFF\xFE"
+                          R"(","fullscreen":0})");
+    rig.request();
+    ASSERT_TRUE(rig.wait_for(1));
+    EXPECT_EQ(rig.deliveries().at(0).info, (ActiveWindowInfo{"ab", "mpv", 0}));
+    rig.server.reply_with("{\xFF}");
+    rig.request();
+    ASSERT_TRUE(rig.wait_for(2));
+    EXPECT_EQ(rig.deliveries().at(1).info, std::nullopt) << "not JSON is still a failure";
 }
 
 TEST(HyprctlQuery, TrueFullscreenIsTheFullscreenBitOfHyprlandsMode) {
