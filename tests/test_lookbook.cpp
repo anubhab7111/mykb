@@ -204,6 +204,38 @@ TEST(LookBook, NotificationColorPrecedence) {
     EXPECT_EQ(flash_color(other.notified(note("Firefox", ""), "")), (Rgb{1, 2, 3}));
 }
 
+TEST(LookBook, AppKeysAreLowercasedByTheLookBookItself) {
+    // A table built by hand, not by the parser: the key keeps its case. The default table is
+    // cleared so no lowercase default key answers for it.
+    ReactionsCfg cfg = default_reactions();
+    cfg.notify.apps.clear();
+    cfg.notify.apps.emplace("ZapZap", ColorRef::theme("peach"));
+    cfg.notify.apps.emplace("Org.Example.Tool", ColorRef::theme("red"));
+    const LookBook look = look_of(cfg);
+
+    EXPECT_EQ(flash_color(look.notified(note("zapzap", ""), "")), kPeach);
+    EXPECT_EQ(flash_color(look.notified(note("ZAPZAP", ""), "")), kPeach);
+    EXPECT_EQ(flash_color(look.notified(note("ZapZap", ""), "")), kPeach);
+    // The whole desktop entry and its last segment go through the same table.
+    EXPECT_EQ(flash_color(look.notified(note("", "org.example.tool"), "")), kRed);
+    EXPECT_EQ(flash_color(look.notified(note("", "com.rtosta.zapzap"), "")), kPeach);
+    // An app that is not in the table still gets the default color.
+    EXPECT_EQ(flash_color(look.notified(note("Firefox", "firefox"), "")), kBlue);
+}
+
+TEST(LookBook, TwoAppKeysThatCollideWhenLowercasedKeepTheFirstSilently) {
+    // The parser rejects such a table, so only a hand-built one reaches the look book. `apps` is
+    // ordered and "ZapZap" sorts before "zapzap", so that entry is the first and its color stays.
+    ReactionsCfg cfg = default_reactions();
+    cfg.notify.apps.clear();
+    cfg.notify.apps.emplace("zapzap", ColorRef::theme("red"));
+    cfg.notify.apps.emplace("ZapZap", ColorRef::theme("peach"));
+    const LookBook look = look_of(cfg);
+
+    EXPECT_EQ(flash_color(look.notified(note("zapzap", ""), "")), kPeach);
+    EXPECT_EQ(flash_color(look.notified(note("ZAPZAP", ""), "")), kPeach);
+}
+
 TEST(LookBook, LowUrgencyIsSkippedByDefault) {
     const LookBook look = default_look();
     EXPECT_FALSE(look.notified(note("Firefox", "", Urgency::Low), "").has_value());
