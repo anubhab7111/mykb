@@ -310,6 +310,33 @@ TEST(Cli, AgentParsesWindowAndSource) {
         << "options may come before the state";
 }
 
+// T14-5: the daemon refuses a window that is not an address, so the CLI says so first, as a usage
+// error. An empty --window is still accepted and names no window.
+TEST(Cli, AgentRejectsAnInvalidWindowWithUsage64) {
+    for (const char *bad : {"zz", "0x", "w1", "0x0xab", "0xab "}) {
+        const auto [r, err] = parse({"agent", "waiting", "--session", "s1", "--window", bad});
+        EXPECT_FALSE(r.has_value()) << '"' << bad << '"';
+        EXPECT_NE(err.find("--window"), std::string::npos) << err;
+    }
+    const std::string too_long(65, 'a');
+    EXPECT_FALSE(parse({"agent", "done", "--session", "s1", "--window", too_long.c_str()})
+                     .first.has_value());
+    const std::string longest = "0x" + std::string(64, 'A');
+    EXPECT_EQ(parse({"agent", "done", "--session", "s1", "--window", longest.c_str()}).first,
+              (Request{req::Agent{"done", "s1", longest, "claude"}}))
+        << "the CLI sends a valid address as given; to_signal normalizes it";
+    EXPECT_EQ(parse({"agent", "waiting", "--session", "s1", "--window", ""}).first,
+              (Request{req::Agent{"waiting", "s1", std::nullopt, "claude"}}))
+        << "an empty window is no window, not an error";
+
+    // Only once parsing is known to fail: otherwise this would reach a running daemon.
+    ASSERT_FALSE(
+        parse({"agent", "waiting", "--session", "s1", "--window", "zz"}).first.has_value());
+    std::string text;
+    EXPECT_EQ(exit_code_of({"agent", "waiting", "--session", "s1", "--window", "zz"}, &text), 64);
+    EXPECT_NE(text.find("--window"), std::string::npos) << text;
+}
+
 // The argument forms packaging/agent-hook/omen-kbd-agent-hook uses, with a real address.
 TEST(Cli, AgentAcceptsTheHooksArgumentForms) {
     const char *session = "0b7b3a54-1c6e-4f43-9c0e-2a8d3e1f9a10";

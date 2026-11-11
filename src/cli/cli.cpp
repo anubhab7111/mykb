@@ -5,6 +5,7 @@
 #include "cli/gen_hyprland.hpp"
 #include "config.hpp"
 #include "core/signals.hpp"
+#include "core/window_address.hpp"
 #include "daemon/daemon.hpp"
 #include "ipc/socket.hpp"
 #include "state.hpp"
@@ -152,6 +153,18 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
         },
         session_bytes);
 
+    // The daemon also refuses a window that is given but is not an address (T14-5); an empty one
+    // names no window.
+    const std::string window_form =
+        std::format("1 to {} hex digits, optionally after 0x", kMaxWindowAddressDigits);
+    const CLI::Validator window_address(
+        [window_form](const std::string &value) {
+            return value.empty() || !normalize_window_address(value).empty()
+                       ? std::string()
+                       : "must be " + window_form + ", got \"" + value + "\"";
+        },
+        window_form);
+
     auto *agent = app->add_subcommand(
         "agent", "Report what a Claude Code session is doing (used by its hook script)");
     agent->add_option("state", x.a, "waiting, working, done or end")
@@ -160,7 +173,8 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
     agent->add_option("--session", x.session, "The session's id, " + session_bytes)
         ->required()
         ->check(session_id);
-    agent->add_option("--window", x.window, "The Hyprland address of the session's terminal");
+    agent->add_option("--window", x.window, "The Hyprland address of the session's terminal")
+        ->check(window_address);
     agent->add_option("--source", x.source, "Which tool reports this session")
         ->capture_default_str();
     sends(agent, [&x] { return req::Agent{x.a, x.session, x.window, x.source}; });
