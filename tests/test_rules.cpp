@@ -189,5 +189,24 @@ TEST(Rules, FullscreenAppMustBeANonEmptyArrayOfStrings) {
         ASSERT_FALSE(r.has_value()) << src;
         EXPECT_NE(r.error().find("fullscreen_app"), std::string::npos)
             << src << " -> " << r.error();
+        EXPECT_TRUE(r.error().starts_with("rule \"x\" when: `fullscreen_app` must be a "))
+            << "the error names the rule: " << src << " -> " << r.error();
     }
+}
+
+// An empty class string is accepted on purpose: it matches a fullscreen window whose class is
+// empty, and nothing else.
+TEST(Rules, FullscreenAppAcceptsAnEmptyClassWhichMatchesOnlyAnEmptyClass) {
+    const auto r = rules("[[rules]]\nname = 'x'\nwhen = { fullscreen_app = [''] }\n"
+                         "brightness_cap = 15\n");
+    ASSERT_EQ(r.size(), 1u);
+    ASSERT_TRUE(r[0].when.fullscreen_app.has_value());
+    EXPECT_EQ(*r[0].when.fullscreen_app, std::vector<std::string>{""});
+
+    Facts f;
+    f.fullscreen_app = "";
+    EXPECT_EQ(evaluate(r, f).brightness_cap, 15) << "a fullscreen window with an empty class";
+    f.fullscreen_app = "mpv";
+    EXPECT_EQ(evaluate(r, f).brightness_cap, std::nullopt) << "mpv is not in the list";
+    EXPECT_EQ(evaluate(r, Facts{}).brightness_cap, std::nullopt) << "no fullscreen window at all";
 }

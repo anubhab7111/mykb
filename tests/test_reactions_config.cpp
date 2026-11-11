@@ -344,6 +344,17 @@ TEST(ReactionsConfig, ZonesColorsAndUrgencyAreValidated) {
               WasdWith::Middle);
 }
 
+TEST(ReactionsConfig, AReactionsValueThatIsNotATableIsRejectedByName) {
+    // The root `reactions` key must hold a table: a flag, a string, a list or an array of tables
+    // is a mistake (`reactions = true` for `[reactions]\nenabled = true`) and says so.
+    for (const std::string_view snippet : {"reactions = 1", "reactions = true", "reactions = 'on'",
+                                           "reactions = []", "[[reactions]]\nenabled = true"}) {
+        const auto c = parse(snippet);
+        ASSERT_FALSE(c.has_value()) << snippet;
+        EXPECT_EQ(c.error(), "`reactions` must be a table") << snippet;
+    }
+}
+
 TEST(ReactionsConfig, ZoneErrorsNameTheZonesKeyLikeTheOtherFields) {
     constexpr std::string_view tail = " (expected left, middle, right or wasd)";
     const std::pair<std::string_view, std::string> cases[] = {
