@@ -55,6 +55,17 @@ std::array<Rgb, 4> all(Rgb c) { return {c, c, c, c}; }
 
 Request set(std::vector<std::string> colors) { return req::Set{std::move(colors)}; }
 
+/// `text` with its first `from` replaced by `to`.
+std::string replaced_once(std::string_view text, std::string_view from, std::string_view to) {
+    std::string out(text);
+    const std::size_t at = out.find(from);
+    EXPECT_NE(at, std::string::npos) << from;
+    if (at != std::string::npos) {
+        out.replace(at, from.size(), to);
+    }
+    return out;
+}
+
 // The colors of kRigConfig (tests/reaction_rig.hpp), whose first profile `plain` is static: the
 // reaction tests below give the daemon the stimuli of the write-count tests and expect the frames
 // the rig counts there.
@@ -877,6 +888,57 @@ TEST_F(DaemonTest, FnKeyThenToggleShowsTheHeldLampInOneWrite) {
     EXPECT_EQ(h().ops().size(), ops);
     const auto busy = std::chrono::duration_cast<std::chrono::milliseconds>(loop_cpu_time() - cpu);
     EXPECT_LT(busy, 250ms) << "the loop thread used " << busy.count() << " ms of CPU in 1 s";
+}
+
+// Task 13 minor 1: the read a new reaction waits for finds the Fn key turned the light back on
+// while a lamp was held in the dark. The reading and the waiting signal show in one frame: the
+// pulse over the lamp, then the lamp. Recomputing for the reading first would cost one more write
+// (the lamp alone, then the pulse, then the lamp).
+TEST_F(DaemonTest, AReadThatFindsTheLightBackOnShowsTheWaitingReactionInItsFirstFrame) {
+    start(kRigConfig);
+    const auto before = zone_writes().size();
+    const auto ops = h().ops();
+    const auto reads = h().backlight_reads();
+    const Frame lit = paint(kBase, {Zone::Right}, kUrgent);
+    h().set_hw_backlight(false); // the Fn key
+    daemon_->post(Event{signal::UrgentRaised{"a1"}});
+    EXPECT_TRUE(wait_until([&] { return h().backlight_reads() > reads; }, 2000ms));
+    std::this_thread::sleep_for(300ms);
+    ASSERT_EQ(h().ops(), ops) << "the lamp is held in the dark";
+
+    std::this_thread::sleep_for(5200ms); // the off reading is no longer fresh
+    h().set_hw_backlight(true);          // the Fn key again: nothing reports it
+    daemon_->post(Event{signal::WindowOpened{}});
+    EXPECT_TRUE(wait_until([&] { return zone_writes().size() >= before + 2; }, 2000ms));
+    std::this_thread::sleep_for(500ms); // the pulse has ended
+    EXPECT_EQ(h().backlight_reads(), reads + 2);
+    EXPECT_EQ(zone_writes_since(before), hw_frames({lifted(lit), lit}))
+        << "the pulse over the lamp, then the lamp: two writes";
+}
+
+// Task 13 minor 3 (R4): a reload that turns `[reactions]` off drops the signals waiting for a read,
+// so a read that predates the daemon's own backlight write is not asked for again.
+TEST_F(DaemonTest, AReloadThatTurnsReactionsOffDropsTheSignalsWaitingForARead) {
+    start(kRigConfig);
+    h().set_delay(500ms);
+    daemon_->post(FactUpdate{fact::FullscreenApp{"mpv"}}); // a slow zone write
+    std::this_thread::sleep_for(100ms);                    // the writer is inside it
+    h().set_delay(0ms);
+    // A backlight write waits in the writer's slot; the read asked for next goes before it, so it
+    // predates that write (the stale read the daemon would ask again for).
+    auto off =
+        std::async(std::launch::async, [this] { return req(req::Power{req::PowerAction::Off}); });
+    std::this_thread::sleep_for(50ms);
+    const auto reads = h().backlight_reads();
+    daemon_->post(Event{signal::WindowOpened{}}); // waits for a read
+    write_file(config_path(), replaced_once(kRigConfig, "[reactions]\nenabled = true",
+                                            "[reactions]\nenabled = false"));
+    const Response r = req(req::Reload{});
+    ASSERT_TRUE(r.ok) << r.error.value_or("");
+    EXPECT_TRUE(off.get().ok);
+    std::this_thread::sleep_for(500ms);
+    EXPECT_EQ(h().backlight_reads(), reads + 1)
+        << "only the read asked for before the reload: off means not even a read";
 }
 
 TEST(EventLoop, TimersRunInOrderPostWorksAcrossThreadsAndCancelSkips) {
