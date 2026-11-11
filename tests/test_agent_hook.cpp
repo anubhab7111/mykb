@@ -372,6 +372,23 @@ TEST_F(AgentHook, AMalformedWindowAddressIsNotPassedOn) {
     EXPECT_EQ(last_call(), "agent waiting --session S1 --source claude");
 }
 
+// Review of the minors, Minor 2: `omen-kbd` refuses an address of more than 64 digits (exit 64, and
+// the hook is silent), so the hook must leave the flag out instead of losing the whole signal.
+TEST_F(AgentHook, AnAddressOfMoreThan64DigitsIsNotPassedOn) {
+    interactive_layout();
+    set_clients({{100, "0x" + std::string(65, 'a')}});
+    raise_waiting();
+    EXPECT_EQ(last_call(), "agent waiting --session S1 --source claude");
+}
+
+TEST_F(AgentHook, AnAddressOfExactly64DigitsIsPassedOn) {
+    interactive_layout();
+    const std::string longest = "0x" + std::string(64, 'a');
+    set_clients({{100, longest}});
+    raise_waiting();
+    EXPECT_EQ(last_call(), "agent waiting --session S1 --window " + longest + " --source claude");
+}
+
 // ---- event mapping ----------------------------------------------------------------------------
 
 TEST_F(AgentHook, EveryWaitingNotificationTypeSendsWaiting) {
