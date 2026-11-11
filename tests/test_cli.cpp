@@ -337,6 +337,19 @@ TEST(Cli, AgentRejectsAnInvalidWindowWithUsage64) {
     EXPECT_NE(text.find("--window"), std::string::npos) << text;
 }
 
+// Review of the minors, Minor 1: `working` and `end` carry no window, so a wrapper that always adds
+// `--window` (even a bad one) must still be able to clear a lamp: it parses, and the request has
+// none.
+TEST(Cli, AgentWorkingAndEndIgnoreAnyWindow) {
+    for (const char *state : {"working", "end"}) {
+        for (const char *window : {"zz", "0x", "0xABC", "w1"}) {
+            EXPECT_EQ(parse({"agent", state, "--session", "s1", "--window", window}).first,
+                      (Request{req::Agent{state, "s1", std::nullopt, "claude"}}))
+                << state << " --window " << window;
+        }
+    }
+}
+
 // The argument forms packaging/agent-hook/omen-kbd-agent-hook uses, with a real address.
 TEST(Cli, AgentAcceptsTheHooksArgumentForms) {
     const char *session = "0b7b3a54-1c6e-4f43-9c0e-2a8d3e1f9a10";

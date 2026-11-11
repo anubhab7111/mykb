@@ -154,16 +154,14 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
         session_bytes);
 
     // The daemon also refuses a window that is given but is not an address (T14-5); an empty one
-    // names no window.
+    // names no window. Only `waiting` and `done` use a window, so only they are checked.
     const std::string window_form =
         std::format("1 to {} hex digits, optionally after 0x", kMaxWindowAddressDigits);
-    const CLI::Validator window_address(
-        [window_form](const std::string &value) {
-            return value.empty() || !normalize_window_address(value).empty()
-                       ? std::string()
-                       : "must be " + window_form + ", got \"" + value + "\"";
-        },
-        window_form);
+    const auto window_problem = [window_form](const std::string &value) {
+        return value.empty() || !normalize_window_address(value).empty()
+                   ? std::string()
+                   : "must be " + window_form + ", got \"" + value + "\"";
+    };
 
     auto *agent = app->add_subcommand(
         "agent", "Report what a Claude Code session is doing (used by its hook script)");
@@ -173,11 +171,24 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
     agent->add_option("--session", x.session, "The session's id, " + session_bytes)
         ->required()
         ->check(session_id);
-    agent->add_option("--window", x.window, "The Hyprland address of the session's terminal")
-        ->check(window_address);
+    agent->add_option("--window", x.window,
+                      "The Hyprland address of the session's terminal (waiting and done use it)");
     agent->add_option("--source", x.source, "Which tool reports this session")
         ->capture_default_str();
-    sends(agent, [&x] { return req::Agent{x.a, x.session, x.window, x.source}; });
+    sends(agent, [&x, window_problem] {
+        // `working` and `end` send no window and ignore a bad one, so a wrapper that always adds
+        // `--window` can still clear a lamp (review of the minors, Minor 1).
+        std::optional<std::string> window;
+        if (x.a == "waiting" || x.a == "done") {
+            window = x.window;
+            if (window) {
+                if (const std::string problem = window_problem(*window); !problem.empty()) {
+                    throw CLI::ValidationError("--window", problem); // a usage error: exit 64
+                }
+            }
+        }
+        return req::Agent{x.a, x.session, std::move(window), x.source};
+    });
 
     sends(app->add_subcommand("reload", "Re-read the config file"), [] { return req::Reload{}; });
 
