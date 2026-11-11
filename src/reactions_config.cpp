@@ -16,28 +16,9 @@ namespace {
 using tomlr::check_keys;
 using tomlr::opt;
 using tomlr::opt_int_in;
+using tomlr::sub_table;
 
 using Err = std::unexpected<std::string>;
-
-#define OMENKBD_TRY(expr)                                                                          \
-    do {                                                                                           \
-        if (auto _r = (expr); !_r) {                                                               \
-            return Err(_r.error());                                                                \
-        }                                                                                          \
-    } while (false)
-
-/// `t[key]` as a table; missing => nullptr; present but not a table => error.
-std::expected<const toml::table *, std::string>
-sub_table(const toml::table &t, std::string_view key, std::string_view where) {
-    const toml::node *n = t.get(key);
-    if (n == nullptr) {
-        return nullptr;
-    }
-    if (!n->is_table()) {
-        return Err(std::format("{}: `{}` must be a table", where, key));
-    }
-    return n->as_table();
-}
 
 /// Reads the integer `key` into `out` when present; it must lie in [lo, hi], so a value that would
 /// wrap or overflow `T` is rejected before it is narrowed.
