@@ -192,6 +192,29 @@ TEST(LookBook, NotificationColorPrecedence) {
     EXPECT_EQ(flash_color(look.notified(note("ZapZap", "discord"), "")), kGreen);
     EXPECT_EQ(flash_color(look.notified(note("Chat", "discord"), "")), kDiscord);
 
+    // ... then the whole entry before its last segment, and the app name before the last segment.
+    // The table holds an app (chat), the entry (org.example.tool) and the last segment (tool),
+    // each with a color of its own; taking the winner out hands the win to the next one.
+    ReactionsCfg order = default_reactions();
+    order.notify.apps.clear();
+    order.notify.apps.emplace("chat", ColorRef::theme("peach"));
+    order.notify.apps.emplace("org.example.tool", ColorRef::theme("red"));
+    order.notify.apps.emplace("tool", ColorRef::theme("yellow"));
+    const LookBook with_all = look_of(order);
+    EXPECT_EQ(flash_color(with_all.notified(note("Chat", "org.example.tool"), "")), kPeach);
+    EXPECT_EQ(flash_color(with_all.notified(note("Other", "org.example.tool"), "")), kRed);
+    EXPECT_EQ(flash_color(with_all.notified(note("Other", "net.example.tool"), "")), kYellow);
+    EXPECT_EQ(flash_color(with_all.notified(note("Other", "net.example.other"), "")), kBlue);
+    order.notify.apps.erase("chat");
+    const LookBook no_app = look_of(order);
+    EXPECT_EQ(flash_color(no_app.notified(note("Chat", "org.example.tool"), "")), kRed);
+    order.notify.apps.erase("org.example.tool");
+    const LookBook only_last = look_of(order);
+    EXPECT_EQ(flash_color(only_last.notified(note("Chat", "org.example.tool"), "")), kYellow);
+    order.notify.apps.emplace("chat", ColorRef::theme("peach"));
+    const LookBook app_and_last = look_of(order);
+    EXPECT_EQ(flash_color(app_and_last.notified(note("Chat", "org.example.tool"), "")), kPeach);
+
     // Critical beats the app table and the default.
     EXPECT_EQ(
         flash_color(look.notified(note("ZapZap", "com.rtosta.zapzap", Urgency::Critical), "")),

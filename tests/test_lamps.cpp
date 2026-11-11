@@ -453,6 +453,95 @@ TEST(LampSet, AgentWinsASharedZone) {
     EXPECT_EQ(lamps.layer(t0), lit(kUrgent, {Zone::Left, Zone::Middle}));
 }
 
+TEST(LampSet, TheDarkPhaseOfAnAgentIntroShowsTheUrgentLightOnASharedZone) {
+    LampSet lamps;
+    LampStyle agent = agent_style(); // ON OFF ON, 150 ms each
+    agent.zones = {Zone::Left, Zone::Wasd};
+    LampStyle urgent = urgent_style();
+    urgent.zones = {Zone::Left, Zone::Middle};
+    lamps.set_style(LampKind::Agent, agent);
+    lamps.set_style(LampKind::Urgent, urgent);
+    lamps.raise(LampKind::Urgent, "u1", std::nullopt, t0, false); // steady
+    lamps.raise(LampKind::Agent, "a1", std::nullopt, t0, true);
+
+    LayerOps agent_on;
+    agent_on[index(Zone::Left)] = Paint{kAgent};
+    agent_on[index(Zone::Middle)] = Paint{kUrgent};
+    agent_on[index(Zone::Wasd)] = Paint{kAgent};
+    EXPECT_EQ(lamps.layer(t0), agent_on);
+
+    // The agent lamp is dark: its Left zone shows the urgent light below it, not black.
+    EXPECT_EQ(lamps.layer(t0 + 150ms), lit(kUrgent, {Zone::Left, Zone::Middle}));
+    EXPECT_EQ(lamps.layer(t0 + 299ms), lit(kUrgent, {Zone::Left, Zone::Middle}));
+    EXPECT_EQ(lamps.layer(t0 + 300ms), agent_on);
+}
+
+TEST(LampSet, TheSameKeyInBothKindsIsTwoKeys) {
+    LampSet lamps = styled();
+    lamps.raise(LampKind::Agent, "k", std::nullopt, t0, false);
+    lamps.raise(LampKind::Urgent, "k", std::nullopt, t0, false);
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), 1U);
+    EXPECT_EQ(lamps.key_count(LampKind::Urgent), 1U);
+
+    // Clearing the key in one kind leaves the other kind's key alone.
+    lamps.clear(LampKind::Agent, "k");
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Urgent}));
+    lamps.raise(LampKind::Agent, "k", std::nullopt, t0, false);
+    lamps.clear(LampKind::Urgent, "k");
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent}));
+    lamps.clear(LampKind::Agent, "k");
+    EXPECT_TRUE(lamps.empty());
+
+    // Linked to one window, the window rule still decides: the agent key replaces the urgent one.
+    lamps.raise(LampKind::Urgent, "k", "w1", t0, false);
+    lamps.raise(LampKind::Agent, "k", "w1", t0, false);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent}));
+    lamps.clear(LampKind::Agent, "k");
+    EXPECT_TRUE(lamps.empty()) << "the urgent key was erased, not only hidden";
+}
+
+TEST(LampSet, AnEmptyKeyIsAnOrdinaryKey) {
+    LampSet lamps = styled();
+    lamps.raise(LampKind::Agent, "", std::nullopt, t0, false);
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), 1U);
+    EXPECT_EQ(lamps.layer(t0), lit(kAgent, {Zone::Wasd}));
+
+    // Raised again it is the same key: a refresh, not a second one.
+    lamps.raise(LampKind::Agent, "", std::nullopt, t0 + 1min, false);
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), 1U);
+    EXPECT_EQ(lamps.next_change(t0 + 1min), t0 + 1min + 1h);
+
+    // Clearing another key does not touch it; clearing it by name does.
+    lamps.clear(LampKind::Agent, "other");
+    EXPECT_EQ(lamps.key_count(LampKind::Agent), 1U);
+    lamps.clear(LampKind::Agent, "");
+    EXPECT_TRUE(lamps.empty());
+}
+
+TEST(LampSet, AnEarlierNowExpiresNothingAndKeepsTheSteadyPaint) {
+    LampSet lamps = styled();
+    const TimePoint raised = t0 + 10min;
+    lamps.raise(LampKind::Agent, "a1", std::nullopt, raised, false);
+    lamps.raise(LampKind::Urgent, "u1", std::nullopt, raised, false);
+
+    // A `now` before the raise is a negative age, which is never past a TTL.
+    lamps.expire(t0);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent, LampKind::Urgent}));
+    lamps.expire(t0 - 100h);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent, LampKind::Urgent}));
+
+    LayerOps both = lit(kUrgent, {Zone::Left, Zone::Middle, Zone::Right});
+    both[index(Zone::Wasd)] = Paint{kAgent};
+    EXPECT_EQ(lamps.layer(t0), both);
+    EXPECT_EQ(lamps.layer(t0 - 100h), both);
+    // Only the TTL is left, counted from the raise.
+    EXPECT_EQ(lamps.next_change(t0), raised + 1h);
+
+    // Going forward again still expires the agent key on time, and only it.
+    lamps.expire(raised + 1h);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Urgent}));
+}
+
 TEST(LampSet, EmptyZonesDisableTheKind) {
     // A set nobody styled has no zones for either kind.
     LampSet unstyled;
@@ -632,4 +721,25 @@ TEST(LampSet, EvictionBreaksTiesBySmallestKey) {
     // k02 is the smallest left, and it is still there.
     lamps.clear(LampKind::Agent, key_n(2));
     EXPECT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind - 1);
+}
+
+TEST(LampSet, AnUrgentRaiseForTheWindowOfAnEvictedAgentKeyIsNotAbsorbed) {
+    LampSet lamps = styled();
+    lamps.raise(LampKind::Agent, key_n(0), "w0", t0, false);
+
+    // Control: while k00 is held, its window's attention light is absorbed.
+    lamps.raise(LampKind::Urgent, "u-control", "w0", t0, false);
+    ASSERT_EQ(lamps.key_count(LampKind::Urgent), 0U) << "the window link is live";
+
+    // k01 to k64 fill the kind past its bound: k00, the oldest, is evicted with its window link.
+    for (int i = 1; i <= kCap; ++i) {
+        lamps.raise(LampKind::Agent, key_n(i), std::nullopt, t0 + std::chrono::seconds(i), false);
+    }
+    ASSERT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind);
+    lamps.clear(LampKind::Agent, key_n(0));
+    ASSERT_EQ(lamps.key_count(LampKind::Agent), kMaxKeysPerKind) << "k00 is already gone";
+
+    lamps.raise(LampKind::Urgent, "u1", "w0", t0 + 2min, false);
+    EXPECT_EQ(lamps.key_count(LampKind::Urgent), 1U);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent, LampKind::Urgent}));
 }

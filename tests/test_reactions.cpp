@@ -684,3 +684,188 @@ TEST(Reactions, StatusListsLampsAndThePlayingChannel) {
     r.on_signal(signal::AgentDone{"s2", std::nullopt}, t0 + 5s, kShown);
     EXPECT_EQ(r.status().playing, "agent-done");
 }
+
+TEST(Reactions, AnEmptyFocusEventMeansNothingIsFocused) {
+    // Hyprland reports no window and no class on an empty workspace (P8).
+    Reactions r = started();
+    r.on_signal(signal::FocusChanged{"w1", "com.rtosta.zapzap"}, t0, kShown);
+    // Control: while that app has focus its notification is skipped.
+    r.on_signal(zapzap(), t0, kShown);
+    ASSERT_FALSE(r.status().playing.has_value());
+    r.on_signal(signal::AgentWaiting{"s1", "w2"}, t0, kShown);
+    r.on_signal(signal::UrgentRaised{"w3"}, t0, kShown);
+    ASSERT_EQ(r.status().lamps, names({"agent", "urgent"}));
+
+    r.on_signal(signal::FocusChanged{"", ""}, t0 + 1s, kShown);
+    // No light is cleared, and an empty class matches no app, so the same notification plays.
+    EXPECT_EQ(r.status().lamps, names({"agent", "urgent"}));
+    r.on_signal(zapzap(), t0 + 1s, kShown);
+    EXPECT_EQ(r.status().playing, "notify");
+
+    // The window that had focus is not focused any more: its attention light is accepted.
+    Reactions q = started();
+    q.on_signal(signal::FocusChanged{"w1", "kitty"}, t0, kShown);
+    q.on_signal(signal::UrgentRaised{"w1"}, t0, kShown);
+    ASSERT_TRUE(q.status().lamps.empty()) << "control: the focused window needs no light";
+    q.on_signal(signal::FocusChanged{"", ""}, t0 + 1s, kShown);
+    q.on_signal(signal::UrgentRaised{"w1"}, t0 + 1s, kShown);
+    EXPECT_EQ(q.status().lamps, names({"urgent"}));
+}
+
+TEST(Reactions, EmptyWindowAddressesBehaveLikeNoWindowWhileAnotherWindowIsFocused) {
+    for (const std::optional<std::string> &window :
+         {std::optional<std::string>{}, std::optional<std::string>{""}}) {
+        SCOPED_TRACE(window ? "empty address" : "no address");
+        Reactions r = started();
+        r.on_signal(signal::FocusChanged{"w0", "kitty"}, t0, kShown);
+
+        // The waiting lamp lights, though a window has focus ...
+        r.on_signal(signal::AgentWaiting{"s1", window}, t0, kShown);
+        EXPECT_EQ(r.status().lamps, names({"agent"}));
+        // ... a window with no address cannot be focused or closed, so no attention light for it
+        // ...
+        r.on_signal(signal::UrgentRaised{""}, t0, kShown);
+        EXPECT_EQ(r.status().lamps, names({"agent"}));
+        r.update(t0 + 400ms, kShown);
+
+        // ... and a finished session flashes while the lamp goes.
+        r.on_signal(signal::AgentDone{"s1", window}, t0 + 400ms, kShown);
+        EXPECT_TRUE(r.status().lamps.empty());
+        EXPECT_EQ(r.status().playing, "agent-done");
+    }
+}
+
+TEST(Reactions, AgentDoneQueuesBehindAPlayingNotifyAndStartsAfterTheGap) {
+    Reactions r = started();
+    r.on_signal(zapzap(), t0, kShown);
+    ASSERT_EQ(r.status().playing, "notify");
+    r.on_signal(signal::AgentDone{"s1", std::nullopt}, t0 + 10ms, kShown);
+
+    // The notification keeps the slot, and the flash waits for its end.
+    EXPECT_EQ(r.status().playing, "notify");
+    EXPECT_EQ(r.layers(t0 + 10ms).transient, everywhere(Paint{kNote}));
+    EXPECT_EQ(r.next_change(), t0 + 150ms);
+
+    // The notify flash is over: the 150 ms gap shows nothing, so two flashes stay two.
+    r.update(t0 + 150ms, kShown);
+    EXPECT_TRUE(empty(r.layers(t0 + 150ms).transient));
+    EXPECT_FALSE(r.status().playing.has_value());
+    EXPECT_EQ(r.next_change(), t0 + 300ms);
+    r.update(t0 + 299ms, kShown);
+    EXPECT_TRUE(empty(r.layers(t0 + 299ms).transient));
+
+    // Then it plays, once, in the agent color on the agent zones.
+    r.update(t0 + 300ms, kShown);
+    EXPECT_EQ(r.layers(t0 + 300ms).transient, lit(kDone, {Zone::Wasd}));
+    EXPECT_EQ(r.status().playing, "agent-done");
+    EXPECT_EQ(r.next_change(), t0 + 450ms);
+    r.update(t0 + 450ms, kShown);
+    EXPECT_TRUE(empty(r.layers(t0 + 450ms).transient));
+    EXPECT_FALSE(r.status().playing.has_value());
+    EXPECT_FALSE(r.next_change().has_value());
+}
+
+TEST(Reactions, ALateUpdateStartsTheQueuedClipAtTheJumpTimeAndReplaysNothing) {
+    Reactions r = started();
+    r.on_signal(zapzap(), t0, kShown);
+    r.on_signal(signal::AgentDone{"s1", std::nullopt}, t0 + 10ms, kShown);
+
+    // The loop did not run for ten minutes (suspend, a stalled loop).
+    const TimePoint late = t0 + 10min;
+    r.update(late, kShown);
+    EXPECT_EQ(r.status().playing, "agent-done");
+    EXPECT_EQ(r.layers(late).transient, lit(kDone, {Zone::Wasd})) << "from its first step, now";
+    EXPECT_EQ(r.layers(late + 149ms).transient, lit(kDone, {Zone::Wasd}));
+    EXPECT_EQ(r.next_change(), late + 150ms);
+
+    // The notification that played before the jump is not replayed, and the flash plays once.
+    r.update(late + 150ms, kShown);
+    EXPECT_TRUE(empty(r.layers(late + 150ms).transient));
+    EXPECT_FALSE(r.status().playing.has_value());
+    EXPECT_FALSE(r.next_change().has_value());
+    r.update(late + 10min, kShown);
+    EXPECT_FALSE(r.status().playing.has_value());
+    EXPECT_FALSE(r.next_change().has_value());
+}
+
+TEST(Reactions, TheSameNowTwiceChangesNothing) {
+    // A clip in flight and one queued, so a repeated update has something to disturb.
+    Reactions r = started();
+    r.on_signal(signal::WorkspaceSwitched{1, 2}, t0, kShown);
+    r.on_signal(zapzap(), t0, kShown);
+    r.update(t0 + 130ms, kShown);
+    const LayerOps transient = r.layers(t0 + 130ms).transient;
+    const LayerOps lamps = r.layers(t0 + 130ms).lamps;
+    const std::optional<TimePoint> next = r.next_change();
+    const ReactionsStatus status = r.status();
+    ASSERT_EQ(transient, lit(kSweep, {Zone::Middle}));
+    ASSERT_EQ(next, t0 + 240ms);
+
+    r.update(t0 + 130ms, kShown);
+    EXPECT_EQ(r.layers(t0 + 130ms).transient, transient);
+    EXPECT_EQ(r.layers(t0 + 130ms).lamps, lamps);
+    EXPECT_EQ(r.next_change(), next);
+    EXPECT_EQ(r.status(), status);
+
+    // The same signal twice at one instant: the second finds the slot taken, restarts nothing.
+    r.on_signal(signal::WorkspaceSwitched{1, 2}, t0 + 130ms, kShown);
+    EXPECT_EQ(r.layers(t0 + 130ms).transient, transient);
+    EXPECT_EQ(r.next_change(), next);
+
+    // Three notifications at one instant: one starts, one waits, the third is dropped. Exactly two
+    // flashes play, one after the other.
+    Reactions n = started();
+    n.on_signal(zapzap(), t0, kShown);
+    n.on_signal(zapzap(), t0, kShown);
+    n.on_signal(zapzap(), t0, kShown);
+    EXPECT_EQ(n.next_change(), t0 + 150ms);
+    n.update(t0 + 150ms, kShown);
+    EXPECT_FALSE(n.status().playing.has_value());
+    n.update(t0 + 300ms, kShown);
+    EXPECT_EQ(n.layers(t0 + 300ms).transient, everywhere(Paint{kNote}));
+    n.update(t0 + 450ms, kShown);
+    EXPECT_FALSE(n.status().playing.has_value());
+    EXPECT_FALSE(n.next_change().has_value());
+
+    // A lamp raised twice at one instant keeps one key and one intro.
+    Reactions l = started();
+    l.on_signal(signal::AgentWaiting{"s1", "w1"}, t0, kShown);
+    l.on_signal(signal::AgentWaiting{"s1", "w1"}, t0, kShown);
+    EXPECT_EQ(l.status().lamps, names({"agent"}));
+    EXPECT_EQ(l.next_change(), t0 + 150ms);
+    l.update(t0 + 300ms, kShown);
+    EXPECT_EQ(l.next_change(), t0 + 3600s);
+}
+
+TEST(Reactions, ANowBeforeThePreviousOneDoesNotCrashOrReplayAnything) {
+    Reactions r = started();
+    const TimePoint later = t0 + 1s;
+    r.on_signal(signal::WorkspaceSwitched{1, 2}, later, kShown);
+    r.on_signal(zapzap(), later + 10ms, kShown); // queued behind the sweep
+    ASSERT_EQ(r.status().playing, "workspace");
+
+    // The clock steps back. The sweep reads its first step, the queue and the slot are as they
+    // were, and a new workspace clip still finds the slot taken.
+    r.update(t0, kShown);
+    EXPECT_EQ(r.status().playing, "workspace");
+    EXPECT_EQ(r.layers(t0).transient, lit(kSweep, {Zone::Left, Zone::Wasd}));
+    EXPECT_EQ(r.next_change(), later + 120ms);
+    r.on_signal(signal::WorkspaceSwitched{2, 3}, t0, kShown);
+    EXPECT_EQ(r.layers(t0).transient, lit(kSweep, {Zone::Left, Zone::Wasd}));
+
+    // Time runs forward again: the sweep ends once, the queued flash follows after the gap, and
+    // neither is played twice.
+    r.update(later + 360ms, kShown);
+    EXPECT_FALSE(r.status().playing.has_value());
+    EXPECT_EQ(r.next_change(), later + 510ms);
+    r.update(later + 510ms, kShown);
+    EXPECT_EQ(r.layers(later + 510ms).transient, everywhere(Paint{kNote}));
+    r.update(later + 660ms, kShown);
+    EXPECT_FALSE(r.status().playing.has_value());
+
+    // Going back once more with nothing to play starts nothing.
+    r.update(t0, kShown);
+    EXPECT_FALSE(r.status().playing.has_value());
+    EXPECT_TRUE(empty(r.layers(t0).transient));
+    EXPECT_FALSE(r.next_change().has_value());
+}
