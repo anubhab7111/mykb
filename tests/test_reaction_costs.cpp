@@ -215,6 +215,10 @@ TEST(ReactionCosts, LampHeldForSixtySecondsAddsNothing) {
     rig.run_for(60s);
     EXPECT_EQ(rig.writes(), 6u);
     EXPECT_EQ(rig.frames().back(), both);
+    // `run_for` took no wake in those 60 s, so sample once: a focus on an unrelated window
+    // recomputes, and the frame still shows both lamps (a lamp that had expired would write).
+    rig.signal(signal::FocusChanged{"5a5a99", "kitty"});
+    EXPECT_EQ(rig.writes(), 6u) << "both lamps still lit after 60 s";
 }
 
 TEST(ReactionCosts, ClaudeWaitCostsFourAndFinishCostsTwo) {
@@ -278,6 +282,26 @@ TEST(ReactionCosts, ClaudeLampWindowRules) {
     // Each step is 2 s: s2 lights at 4 s, its window's focus clears it at 6 s, s3 lights at 10 s.
     EXPECT_EQ(rig.frame_times(),
               times({4000ms, 4150ms, 4300ms, 6000ms, 10000ms, 10150ms, 10300ms}));
+}
+
+// Task 11 minor 4: an empty window string on AgentWaiting or AgentDone is no window, even while
+// an empty workspace (focus "") has focus: the lamp lights and stays, and the flash plays.
+TEST(ReactionCosts, AnEmptyAgentWindowIsNoWindow) {
+    const Frame waiting = paint(kBase, {Zone::Wasd}, kWaiting);
+    const Frame done = paint(kBase, {Zone::Wasd}, kDone);
+    ReactionRig rig;
+    rig.signal(signal::FocusChanged{"", ""});
+    rig.signal(signal::AgentWaiting{"s1", ""});
+    rig.run_for(2s);
+    EXPECT_EQ(rig.frames(), frames({waiting, kBase, waiting}));
+    rig.signal(signal::FocusChanged{"", ""});
+    rig.run_for(2s);
+    EXPECT_EQ(rig.writes(), 3u) << "focusing an empty workspace leaves the lamp lit";
+
+    rig.signal(signal::AgentDone{"s1", ""});
+    rig.run_for(2s);
+    EXPECT_EQ(rig.frames(), frames({waiting, kBase, waiting, done, kBase}));
+    EXPECT_EQ(rig.frame_times(), times({0ms, 150ms, 300ms, 4000ms, 4150ms}));
 }
 
 // Ruling P7: an agent raise drops the urgent light of its window in the frame that lights WASD.
