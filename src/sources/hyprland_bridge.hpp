@@ -33,9 +33,10 @@ class HyprlandBridge {
     ///
     /// While `fullscreen_wanted`, each request to look at fullscreen starts a query to the request
     /// socket next to the connected socket2, and the fact follows the answer. A failed query keeps
-    /// the last value; if that value is a fullscreen app (the keyboard is dimmed), the bridge asks
-    /// once more about 500 ms later, and a retry that fails is not retried (F3). A new request, a
-    /// disconnect or turning the fact off drops a pending retry. Turning it on while connected
+    /// the last value; if that value names a fullscreen app (the keyboard may be dimmed), the
+    /// bridge asks once more 500 ms later (the query itself starts after its 100 ms debounce, so
+    /// about 600 ms after the failure), and a retry that fails is not retried (F3). A new request,
+    /// a disconnect or turning the fact off drops a pending retry. Turning it on while connected
     /// asks once at once (the check that came with the connection found nobody wanting it);
     /// turning it off clears the fact (once) and drops any query. Loop thread only.
     void configure(bool reactions_on, bool fullscreen_wanted);

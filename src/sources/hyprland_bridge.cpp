@@ -100,8 +100,9 @@ void HyprlandBridge::cancel_retry() {
 
 void HyprlandBridge::on_query_result(const std::optional<ActiveWindowInfo> &info) {
     if (!info) {
-        // The query failed: keep what we know. If that is "dimmed", one failure must not keep the
-        // keyboard dimmed until the next event, so ask once more; a retry that fails stops here.
+        // The query failed: keep what we know. If that names a fullscreen app, the keyboard may be
+        // dimmed (when a rule lists the class), and one failure must not keep it dimmed until the
+        // next event, so ask once more; a retry that fails stops here.
         if (fullscreen_ && !std::exchange(retrying_, false)) {
             retry_ = loop_.at(Clock::now() + kRetryDelay, [this] {
                 retry_.reset();

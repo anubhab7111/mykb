@@ -88,7 +88,7 @@ kill %2 %1
 | `doctor` | Read-only checks: driver and `readonly`, permissions, competing writers, hp-wmi DKMS packages, daemon, hooks, theme. |
 | `gen-hyprland` | Print the Hyprland hook (`kbdlight.lua`) for mode colors. |
 | `notify [--app TEXT] [--desktop-entry TEXT] [--urgency low\|normal\|critical]` | Report a desktop notification, for the notification flash. Used by `rice-notify-sound` (`notify-reaction.sh`). Urgency is case-insensitive. |
-| `agent <waiting\|working\|done\|end> --session ID [--window ADDR] [--source NAME]` | Report what a coding-agent session is doing, for the Claude lamp. Used by `omen-kbd-agent-hook`. `ID` is 1 to 128 bytes. `--window` is the Hyprland address of the session's terminal; `--source` defaults to `claude`. |
+| `agent <waiting\|working\|done\|end> --session ID [--window ADDR] [--source NAME]` | Report what a coding-agent session is doing, for the Claude lamp. Used by `omen-kbd-agent-hook`. `ID` is 1 to 128 bytes. `--window` is the Hyprland address of the session's terminal: 1 to 64 hex digits, optionally after `0x` (for `waiting` and `done` anything else exits 64; `working` and `end` take no window and ignore it); `--source` defaults to `claude`. |
 | `daemon [--backend auto\|mock\|hp-omen-kbd\|mainline-led] [--mock-render] [--no-sources]` | Run the daemon. `auto` only picks a real backend. |
 
 Exit codes: `0` ok; `1` the daemon or the keyboard write reported an error (message on stderr), or
