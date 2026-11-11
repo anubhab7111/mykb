@@ -833,6 +833,135 @@ TEST(HyprlandBridge, ADisconnectDropsAQueryInFlight) {
     EXPECT_EQ(events.size(), 2u) << "the cleared fact stays cleared";
 }
 
+namespace {
+
+/// F3: a bridge with the fullscreen fact wanted, connected, and the fact set to mpv (the keyboard
+/// is dimmed). Then `fail_next_query` makes the next query fail, as one that ends the movie can.
+struct DimmedBridge {
+    FakeHyprland hypr_sock;
+    FakeRequestServer &requests = hypr_sock.serve_requests();
+    EventLoop loop;
+    Events events;
+    std::optional<HyprlandBridge> bridge;
+    std::optional<LoopThread> running;
+    UniqueFd conn;
+
+    explicit DimmedBridge(bool fact_set = true) {
+        requests.reply_with(window_json("mpv", fact_set ? 2 : 0));
+        bridge.emplace(loop, hypr_sock.paths(), events.sink());
+        bridge->configure(false, true); // the loop is not running yet
+        running.emplace(loop);
+        conn = accept_within(hypr_sock.listener->get(), 2000ms);
+    }
+    ~DimmedBridge() { running.reset(); } // stop the loop before the bridge goes
+    DimmedBridge(const DimmedBridge &) = delete;
+    DimmedBridge &operator=(const DimmedBridge &) = delete;
+
+    /// The socket2 line `fullscreen>>0` starts a query that fails (an unusable reply). Returns
+    /// once the server has read it: what it answers next is up to the test.
+    void fail_next_query() {
+        const std::size_t asked = requests.requests().size();
+        requests.reply_with("Invalid");
+        send(conn, "fullscreen>>0\n");
+        ASSERT_TRUE(requests.wait_for_requests(asked + 1));
+    }
+};
+
+} // namespace
+
+// F3: one failed query after `fullscreen>>0` would leave the keyboard dimmed until the next focus,
+// workspace, close or fullscreen event. While the fact is set, a failure asks once more ~500 ms
+// later.
+TEST(HyprlandBridge, AFailedQueryWhileDimmedIsRetriedOnce) {
+    DimmedBridge b;
+    ASSERT_TRUE(b.conn);
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 1; }, 2000ms));
+    ASSERT_EQ(b.events.get(), (std::vector<Event>{fullscreen_is("mpv")}));
+
+    const TimePoint failed = Clock::now();
+    b.fail_next_query();
+    b.requests.reply_with(window_json("mpv", 0)); // the movie has ended
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 2; }, 2000ms)) << "the retry";
+    EXPECT_GE(Clock::now() - failed, 450ms) << "about 500 ms after the failure";
+    EXPECT_EQ(b.events.get(), (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared()}));
+    EXPECT_EQ(b.requests.connections(), 3) << "start, the failed query, the retry";
+}
+
+TEST(HyprlandBridge, ARetryThatFailsIsNotRetriedAgain) {
+    DimmedBridge b;
+    ASSERT_TRUE(b.conn);
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 1; }, 2000ms));
+
+    b.fail_next_query(); // and every query after it fails too ("Invalid" stays the reply)
+    ASSERT_TRUE(b.requests.wait_for_requests(3)) << "the one retry";
+    std::this_thread::sleep_for(1200ms);
+    EXPECT_EQ(b.requests.connections(), 3) << "never more than one retry";
+    EXPECT_EQ(b.events.get(), (std::vector<Event>{fullscreen_is("mpv")}))
+        << "a failure keeps the last value";
+}
+
+TEST(HyprlandBridge, NoRetryWhenTheFactIsNotSet) {
+    DimmedBridge b(false);
+    ASSERT_TRUE(b.conn);
+    ASSERT_TRUE(b.requests.wait_for_requests(1));
+    std::this_thread::sleep_for(100ms);
+    ASSERT_EQ(b.events.size(), 0u) << "not fullscreen: not dimmed";
+
+    b.fail_next_query(); // fails safe: nothing to heal
+    std::this_thread::sleep_for(900ms);
+    EXPECT_EQ(b.requests.connections(), 2) << "no retry";
+    EXPECT_EQ(b.events.size(), 0u);
+}
+
+TEST(HyprlandBridge, ANewRequestCancelsAPendingRetry) {
+    DimmedBridge b;
+    ASSERT_TRUE(b.conn);
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 1; }, 2000ms));
+
+    b.fail_next_query();
+    b.requests.reply_with(window_json("mpv", 2));
+    std::this_thread::sleep_for(100ms); // the failure is in, the retry is pending
+    send(b.conn, "fullscreen>>1\n");    // a newer question
+    ASSERT_TRUE(b.requests.wait_for_requests(3));
+    std::this_thread::sleep_for(900ms); // well past when the retry would have asked
+    EXPECT_EQ(b.requests.connections(), 3) << "the retry was dropped for the newer query";
+    EXPECT_EQ(b.events.size(), 1u) << "and its answer (still mpv) is no news";
+}
+
+TEST(HyprlandBridge, TurningFullscreenOffCancelsAPendingRetry) {
+    DimmedBridge b;
+    ASSERT_TRUE(b.conn);
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 1; }, 2000ms));
+
+    b.fail_next_query();
+    b.requests.reply_with(window_json("mpv", 2));
+    std::this_thread::sleep_for(100ms); // the retry is pending
+    configure_on_loop(b.loop, *b.bridge, false, false);
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 2; }, 2000ms));
+    std::this_thread::sleep_for(900ms);
+    EXPECT_EQ(b.requests.connections(), 2) << "no retry once the fact is not wanted";
+    EXPECT_EQ(b.events.get(), (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared()}))
+        << "the fact stays cleared";
+}
+
+// A disconnect clears the fact and drops the retry with it. (While disconnected there is no socket
+// to ask anyway, and the source reconnects only after 1 s, past the retry.)
+TEST(HyprlandBridge, ADisconnectCancelsAPendingRetry) {
+    DimmedBridge b;
+    ASSERT_TRUE(b.conn);
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 1; }, 2000ms));
+
+    b.fail_next_query();
+    b.requests.reply_with(window_json("mpv", 2));
+    std::this_thread::sleep_for(100ms); // the retry is pending
+    b.conn.reset();                     // Hyprland goes away
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 3; }, 2000ms));
+    std::this_thread::sleep_for(600ms); // past the retry, before the reconnect
+    EXPECT_EQ(b.requests.connections(), 2);
+    EXPECT_EQ(b.events.get(), (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared(),
+                                                  event::Submap{std::nullopt}}));
+}
+
 TEST(Theme, LinkChainFollowsRiceLayout) {
     TempDir d;
     make_rice_layout(d.path());
