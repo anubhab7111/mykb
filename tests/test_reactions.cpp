@@ -1,6 +1,7 @@
 #include "daemon/reactions.hpp"
 
 #include "core/palette.hpp"
+#include "sources/hyprland_tracker.hpp"
 
 #include <chrono>
 #include <gtest/gtest.h>
@@ -8,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 using namespace omenkbd;
@@ -868,4 +870,35 @@ TEST(Reactions, ANowBeforeThePreviousOneDoesNotCrashOrReplayAnything) {
     EXPECT_FALSE(r.status().playing.has_value());
     EXPECT_TRUE(empty(r.layers(t0).transient));
     EXPECT_FALSE(r.next_change().has_value());
+}
+
+// Hyprland events through the real tracker into the facade, across a disconnect (deferred minor
+// Task 14-4): the tracker resets its focus on Disconnected, and the facade must forget it too, or a
+// notification right after a Hyprland restart is judged against the old window's class.
+TEST(Reactions, AHyprlandDisconnectMakesTheFacadeForgetTheFocusedWindow) {
+    Reactions r = started();
+    HyprlandTracker tracker;
+    const auto feed = [&](const HyprEvent &event, TimePoint now) {
+        for (const TrackerOut &out : tracker.on(event)) {
+            if (const auto *s = std::get_if<Signal>(&out)) {
+                r.on_signal(*s, now, kShown);
+            }
+        }
+    };
+    feed(hypr::Connected{}, t0);
+    feed(hypr::ActiveWindow{"com.rtosta.zapzap"}, t0);
+    feed(hypr::ActiveWindowV2{"55f85f9ab0d0"}, t0);
+
+    // The notifying app has the focus: skipped.
+    r.on_signal(zapzap(), t0, kShown);
+    EXPECT_TRUE(empty(r.layers(t0).transient));
+    EXPECT_FALSE(r.status().playing.has_value());
+
+    // Hyprland goes away and comes back. Nothing is focused until the next focus event, so the
+    // same notification now plays.
+    feed(hypr::Disconnected{}, t0 + 1s);
+    feed(hypr::Connected{}, t0 + 2s);
+    r.on_signal(zapzap(), t0 + 2s, kShown);
+    EXPECT_EQ(r.layers(t0 + 2s).transient, everywhere(Paint{kNote}));
+    EXPECT_EQ(r.status().playing, "notify");
 }
