@@ -455,10 +455,12 @@ TEST(HyprlandBridge, DisconnectResetsUrgentWhileReactionsAreOn) {
     send(first, "urgent>>abc\n");
     ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
     first.reset();
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 5; }, 2000ms));
     EXPECT_EQ(events.get(),
               (std::vector<Event>{sig(signal::UrgentRaised{"abc"}), sig(signal::UrgentReset{}),
-                                  fullscreen_cleared(), event::Submap{std::nullopt}}));
+                                  fullscreen_cleared(), event::Submap{std::nullopt},
+                                  sig(signal::FocusChanged{"", ""})}))
+        << "T14-4: the stale focus and class are cleared too";
 }
 
 // P25: the tracker follows Hyprland while reactions are off, but the daemon hears no signal.

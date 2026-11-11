@@ -290,7 +290,10 @@ TEST(HyprlandTracker, DisconnectClearsUrgentFullscreenAndSubmap) {
     focus(t, "kitty", "a1");
     (void)t.on(hypr::Urgent{"a2"});
     EXPECT_EQ(t.on(hypr::Disconnected{}),
-              (Out{sig(signal::UrgentReset{}), fullscreen_cleared(), submap_cleared()}));
+              (Out{sig(signal::UrgentReset{}), fullscreen_cleared(), submap_cleared(),
+                   sig(signal::FocusChanged{"", ""})}))
+        << "T14-4: the focus (and its class) is forgotten downstream too";
+    EXPECT_EQ(t.replay(), std::vector<Signal>{}) << "and no focus is held to replay";
     // The state is gone too: the old urgent window clears nothing, the first workspace only
     // records, and the old focus emits again.
     EXPECT_EQ(t.on(hypr::CloseWindow{"a2"}), (Out{sig(signal::WindowClosed{}), check()}));
@@ -345,7 +348,8 @@ TEST(HyprlandTracker, RepeatedActiveWindowForTheSameWindowIsIgnored) {
         << "after Connected the first focus event emits again";
 
     EXPECT_EQ(t.on(hypr::Disconnected{}),
-              (Out{sig(signal::UrgentReset{}), fullscreen_cleared(), submap_cleared()}));
+              (Out{sig(signal::UrgentReset{}), fullscreen_cleared(), submap_cleared(),
+                   sig(signal::FocusChanged{"", ""})}));
     (void)t.on(hypr::ActiveWindow{"kitty"});
     EXPECT_EQ(t.on(hypr::ActiveWindowV2{"a1"}),
               (Out{sig(signal::FocusChanged{"a1", "kitty"}), check()}))
