@@ -312,6 +312,19 @@ TEST(Model, FullscreenFactSelectsTheCap) {
     EXPECT_EQ(in(m).brightness, 100);
 }
 
+// The literal sequence mpv, then no fullscreen window, then full brightness again, with no other
+// cap in play (the test above ends with power saver and a battery value mixed in).
+TEST(Model, FullscreenFactReleasesTheCapWhenNothingElseCaps) {
+    Model m = model();
+    EXPECT_EQ(in(m).brightness, 100);
+    m.apply_fact(fact::FullscreenApp{"mpv"});
+    EXPECT_EQ(in(m).brightness, 15);
+    m.apply_fact(fact::FullscreenApp{std::nullopt});
+    EXPECT_EQ(in(m).brightness, 100) << "no other cap applies, so back to full";
+    EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, std::nullopt);
+    EXPECT_TRUE(m.status(nullptr).active_rules.empty());
+}
+
 // `Facts::fullscreen_app` is documented as lowercase and the rules compare it with the lowercased
 // classes of a rule, so the model enforces that at the one place a fact enters.
 TEST(Model, FullscreenFactIsLowercasedWhereItEntersTheModel) {

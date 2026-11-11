@@ -1,7 +1,10 @@
 #include "config.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <gtest/gtest.h>
+#include <vector>
 
 using namespace omenkbd;
 
@@ -60,6 +63,27 @@ TEST(Config, RejectsInvalid) {
         const auto c = parse_config(snippet);
         ASSERT_FALSE(c.has_value()) << snippet;
         EXPECT_NE(c.error().find(needle), std::string::npos) << snippet << " -> " << c.error();
+    }
+}
+
+TEST(Config, ASectionOrSubTableThatIsNotATableIsRejectedNamingItsKey) {
+    // The root sections name only the key; the sub-tables of `device` and `hints` lead with the
+    // section, like the other errors of those sections.
+    const std::pair<const char *, const char *> cases[] = {
+        {"device = 1", "`device` must be a table"},
+        {"effects = true", "`effects` must be a table"},
+        {"theme = 'x'", "`theme` must be a table"},
+        {"gates = []", "`gates` must be a table"},
+        {"hints = 1", "`hints` must be a table"},
+        {"[device]\nzone_map = 1", "device: `zone_map` must be a table"},
+        {"[hints]\nmodifiers = 1", "hints: `modifiers` must be a table"},
+        {"[hints]\nsubmaps = 'x'", "hints: `submaps` must be a table"},
+    };
+    for (const auto &[snippet, expected] : cases) {
+        const auto c = parse_config(std::string(snippet) + "\n[[profiles]]\nname='a'\n"
+                                                           "colors=['#000000']");
+        ASSERT_FALSE(c.has_value()) << snippet;
+        EXPECT_EQ(c.error(), expected) << snippet;
     }
 }
 
