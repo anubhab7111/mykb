@@ -82,9 +82,8 @@ TEST(Ipc, EveryRequestRoundtrips) {
 
 TEST(Ipc, NotifyRoundTripsWithKebabCaseKeys) {
     const Request notify{req::Notify{"ZapZap", "com.rtosta.zapzap", "critical"}};
-    EXPECT_EQ(
-        encode(notify),
-        R"({"cmd":"notify","app":"ZapZap","desktop-entry":"com.rtosta.zapzap","urgency":"critical"})");
+    EXPECT_EQ(encode(notify), R"({"cmd":"notify","app":"ZapZap",)"
+                              R"("desktop-entry":"com.rtosta.zapzap","urgency":"critical"})");
     const auto back = decode_request(encode(notify));
     ASSERT_TRUE(back.has_value()) << back.error();
     EXPECT_EQ(*back, notify);
