@@ -123,6 +123,34 @@ TEST(HyprlandParse, MalformedLinesAreIgnoredNotThrown) {
     }
 }
 
+// T14-3: a NUL byte is just a byte (nothing is cut short at it), and a line of exactly 64 KiB
+// still parses while one byte more is dropped.
+TEST(HyprlandParse, EmbeddedNulAndThe64KiBBoundary) {
+    using namespace std::string_literals;
+    EXPECT_EQ(parse_socket2_line("submap>>a\0b"s), HyprEvent{hypr::Submap{"a\0b"s}})
+        << "the name is kept whole";
+    EXPECT_EQ(parse_socket2_line("activewindow>>kit\0ty,a \0 title"s),
+              HyprEvent{hypr::ActiveWindow{"kit\0ty"s}});
+    EXPECT_EQ(parse_socket2_line("urgent>>ab\0cd"s), std::nullopt) << "not an address";
+    EXPECT_EQ(parse_socket2_line("urgent>>ab\0"s), std::nullopt);
+    EXPECT_EQ(parse_socket2_line("activewindowv2>>\0"s), std::nullopt)
+        << "a NUL is not an empty address";
+    EXPECT_EQ(parse_socket2_line("\0urgent>>ab"s), std::nullopt) << "not an event we know";
+    EXPECT_EQ(parse_socket2_line("urgent\0>>ab"s), std::nullopt);
+    EXPECT_EQ(parse_socket2_line("workspacev2>>4\0,x"s), std::nullopt);
+
+    constexpr std::size_t kMax = std::size_t{64} * 1024;
+    const std::string prefix = "submap>>";
+    const std::string name(kMax - prefix.size(), 'n');
+    EXPECT_EQ(parse_socket2_line(prefix + name), HyprEvent{hypr::Submap{name}})
+        << "exactly 64 KiB parses";
+    EXPECT_EQ(parse_socket2_line(prefix + name + "n"), std::nullopt) << "one byte more does not";
+    const std::string title(kMax - std::string("activewindow>>kitty,").size(), 't');
+    EXPECT_EQ(parse_socket2_line("activewindow>>kitty," + title),
+              HyprEvent{hypr::ActiveWindow{"kitty"}});
+    EXPECT_EQ(parse_socket2_line("activewindow>>kitty," + title + "t"), std::nullopt);
+}
+
 TEST(HyprlandParse, AddressesAreNormalized) {
     EXPECT_EQ(parse_socket2_line("activewindowv2>>0xABCdef"),
               HyprEvent{hypr::ActiveWindowV2{"abcdef"}});
