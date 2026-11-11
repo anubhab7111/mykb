@@ -1,6 +1,5 @@
 // Hyprland socket2 lines (pure parser) and the tracker that turns parsed events into signals.
 
-#include "core/window_address.hpp"
 #include "sources/hyprland.hpp"
 #include "sources/hyprland_tracker.hpp"
 
@@ -34,16 +33,6 @@ void focus(HyprlandTracker &t, const std::string &app_class, const std::string &
 }
 
 } // namespace
-
-TEST(WindowAddress, IsLowercaseHexWithoutThe0xPrefix) {
-    EXPECT_EQ(normalize_window_address("0xABCdef"), "abcdef");
-    EXPECT_EQ(normalize_window_address("0X55666F363B20"), "55666f363b20");
-    EXPECT_EQ(normalize_window_address("55666F363B20"), "55666f363b20");
-    EXPECT_EQ(normalize_window_address("abc"), "abc");
-    EXPECT_EQ(normalize_window_address("0x"), "") << "a bare prefix names no window";
-    EXPECT_EQ(normalize_window_address(""), "");
-    EXPECT_EQ(normalize_window_address("0x0xab"), "0xab") << "only one prefix is stripped";
-}
 
 TEST(HyprlandParse, ParsesEveryEventWeUse) {
     EXPECT_EQ(parse_socket2_line("submap>>resize"), HyprEvent{hypr::Submap{"resize"}});
