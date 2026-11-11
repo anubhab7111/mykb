@@ -48,7 +48,7 @@ class ClipPlayer {
     ///   - `Notify`, `AgentDone`: start when idle; otherwise queued if the queue is empty, else
     ///     dropped.
     /// An offer that would start now is dropped when `max_per_minute` starts already fall in the
-    /// minute before `now`.
+    /// last 60 s up to `now`: a start exactly 60 s old no longer counts.
     Offer offer(Channel channel, Clip clip, TimePoint now);
 
     /// Retires the playing clip once it is over, and starts the queued clip once `gap` has passed
@@ -89,8 +89,8 @@ class ClipPlayer {
     };
 
     /// Puts `clip` in the playing slot at `now` unless `max_per_minute` starts already fall in the
-    /// minute before `now`; then it returns false and the clip is lost. The caller has checked
-    /// that the slot is free.
+    /// last 60 s up to `now` (half-open: a start exactly 60 s old no longer counts); then it
+    /// returns false and the clip is lost. The caller has checked that the slot is free.
     bool try_start(Channel channel, Clip clip, TimePoint now);
 
     PlayerLimits limits_;
