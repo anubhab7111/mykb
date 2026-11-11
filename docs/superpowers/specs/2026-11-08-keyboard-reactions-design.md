@@ -301,7 +301,9 @@ model the way submaps do today.
   - An urgent raise for a window that already has an agent key is absorbed: no second light for one
     event. The reverse holds too: raising an agent key for a window drops any urgent key linked to
     that window. If the terminal also asks for attention (it rings its bell), its urgent signal
-    arrives first, and the agent lamp then replaces it (a window never holds keys of both kinds).
+    arrives first, and the agent lamp then replaces it (a window never holds keys of both kinds,
+    except after a reload that empties the agent lamp's `zones` while its key is held: a lamp that
+    cannot show does not absorb the attention light, so an urgent raise for that window is kept).
     The attention light has already blinked by then; the replacement costs no extra write, because
     it rides on the agent lamp's first frame. Live check (2026-11-11, Alacritty on Hyprland 0.57):
     a real `permission_prompt` did not make the terminal urgent, so a waiting episode cost 3 + 1 as
