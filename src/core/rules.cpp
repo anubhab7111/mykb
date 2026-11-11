@@ -25,14 +25,9 @@ std::expected<void, std::string> take(std::expected<std::optional<T>, std::strin
     return {};
 }
 
-#define OMENKBD_TRY(expr)                                                                          \
-    do {                                                                                           \
-        if (auto _r = (expr); !_r) {                                                               \
-            return std::unexpected(_r.error());                                                    \
-        }                                                                                          \
-    } while (false)
-
-/// `fullscreen_app = ["mpv", ...]`: a non-empty list of strings, lowercased here once.
+/// `fullscreen_app = ["mpv", ...]`: a non-empty list of strings, lowercased here once. An empty
+/// class string is accepted on purpose and matches only a window whose class is empty (pinned by
+/// `Rules.FullscreenAppAcceptsAnEmptyClassWhichMatchesOnlyAnEmptyClass`).
 std::expected<std::optional<std::vector<std::string>>, std::string>
 parse_fullscreen_app(const toml::table &t, std::string_view where) {
     const toml::node *n = t.get("fullscreen_app");
