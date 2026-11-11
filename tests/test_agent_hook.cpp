@@ -209,17 +209,21 @@ class AgentHook : public testing::Test {
     /// that is checked here for all tests; `extra_env` (VAR=value ...) overrides the defaults.
     Result hook(const std::string &input, const std::string &extra_env = "") {
         write_file(root() / "in.json", input);
-        const std::string cmd =
-            "env -i PATH='" + path_env() + "' HOME=" + shq(root() / "home") +
-            " XDG_RUNTIME_DIR=" + shq(run_dir()) + " OMEN_KBD_BIN=" + shq(bin_dir() / "omen-kbd") +
-            " OMEN_KBD_HYPRCTL=" + shq(bin_dir() / "hyprctl") +
-            " OMEN_KBD_PROC=" + shq(proc_dir()) +
-            " OMEN_KBD_START_PID=" + std::to_string(start_pid_) + " " + extra_env + " /bin/bash " +
-            shq(hook_script()) + " < " + shq(root() / "in.json");
-        Result r = run(cmd);
+        Result r = run(hook_command(extra_env) + " < " + shq(root() / "in.json"));
         EXPECT_EQ(r.code, 0) << payload_summary(input);
         EXPECT_EQ(r.out, "") << "the hook must print nothing: " << payload_summary(input);
         return r;
+    }
+
+    /// The command line that runs the hook under `env -i`, without a stdin redirection.
+    [[nodiscard]] std::string hook_command(const std::string &extra_env = "") const {
+        return "env -i PATH='" + path_env() + "' HOME=" + shq(root() / "home") +
+               " XDG_RUNTIME_DIR=" + shq(run_dir()) +
+               " OMEN_KBD_BIN=" + shq(bin_dir() / "omen-kbd") +
+               " OMEN_KBD_HYPRCTL=" + shq(bin_dir() / "hyprctl") +
+               " OMEN_KBD_PROC=" + shq(proc_dir()) +
+               " OMEN_KBD_START_PID=" + std::to_string(start_pid_) + " " + extra_env +
+               " /bin/bash " + shq(hook_script());
     }
 
     /// Makes the fake omen-kbd take 5 s (and ignore SIGTERM when `ignore_term`).
@@ -526,6 +530,21 @@ TEST_F(AgentHook, DoesNothingWithoutARuntimeDirectory) {
     interactive_layout();
     hook(payload("Notification", "S1", "permission_prompt"), "XDG_RUNTIME_DIR=");
     EXPECT_TRUE(calls().empty());
+}
+
+// With fd 0 closed (not empty), bash hands the `$(jq ...)` pipe's read end the number 0, so jq
+// would read its own output and never finish. `timeout 3` turns a regression into a failure (exit
+// 124) instead of a test that never returns.
+TEST_F(AgentHook, ExitsZeroPromptlyAndSilentlyWhenStdinIsClosed) {
+    interactive_layout();
+    const auto t0 = std::chrono::steady_clock::now();
+    const Result r = run("timeout -k 1 3 " + hook_command() + " <&-");
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+    EXPECT_EQ(r.code, 0) << "124 means the hook hung on its closed stdin";
+    EXPECT_EQ(r.out, "");
+    EXPECT_LT(elapsed, std::chrono::milliseconds(1000));
+    EXPECT_TRUE(calls().empty());
+    EXPECT_FALSE(fs::exists(run_dir())) << "no input: no marker, no cache";
 }
 
 // ---- shellcheck and the snippets --------------------------------------------------------------

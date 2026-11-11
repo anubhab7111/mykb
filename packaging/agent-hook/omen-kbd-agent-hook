@@ -41,6 +41,10 @@
 set -u
 umask 077
 trap 'exit 0' EXIT
+# A closed fd 0 (not an empty stdin) would make bash give the `$(jq ...)` pipe's read end the number
+# 0, and jq would read its own output forever. Copying fd 0 to fd 3 fails on a closed descriptor
+# (`<&0` alone succeeds even then, so it cannot be the test).
+{ : 3<&0; } 2>/dev/null || exit 0
 exec >/dev/null 2>&1
 
 command -v jq >/dev/null || exit 0
