@@ -30,7 +30,8 @@ constexpr bool is_true_fullscreen(int mode) { return (static_cast<unsigned>(mode
 
 /// The JSON that `j/activewindow` returns for a window ⇒ its address, class and fullscreen mode.
 /// Pure. nullopt for `{}` (nothing focused), for anything that is not a JSON object with a string
-/// `address` (not empty after normalizing), a string `class` and a non-negative integer
+/// `address` that is a valid window address (see `normalize_window_address`), a string `class` and
+/// a non-negative integer
 /// `fullscreen`, and for garbage; never throws. Other fields, the title among them, are ignored.
 std::optional<ActiveWindowInfo> parse_active_window(std::string_view json);
 

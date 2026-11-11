@@ -128,10 +128,30 @@ TEST(HyprlandParse, AddressesAreNormalized) {
               HyprEvent{hypr::ActiveWindowV2{"abcdef"}});
     EXPECT_EQ(parse_socket2_line("activewindowv2>>55666F363B20"),
               HyprEvent{hypr::ActiveWindowV2{"55666f363b20"}});
-    EXPECT_EQ(parse_socket2_line("activewindowv2>>0x"), HyprEvent{hypr::ActiveWindowV2{""}});
     EXPECT_EQ(parse_socket2_line("openwindow>>0XAB12,1,c,t"), HyprEvent{hypr::OpenWindow{"ab12"}});
     EXPECT_EQ(parse_socket2_line("closewindow>>0xAB12"), HyprEvent{hypr::CloseWindow{"ab12"}});
     EXPECT_EQ(parse_socket2_line("urgent>>0xAB12"), HyprEvent{hypr::Urgent{"ab12"}});
+}
+
+// T14-5: a field that is not an address makes the line malformed. Only a genuinely empty
+// `activewindowv2` means "nothing focused"; an invalid one must not pass for it.
+TEST(HyprlandParse, AnInvalidAddressMakesTheLineMalformed) {
+    const std::string hex64(64, 'a');
+    const std::string hex65(65, 'a');
+    EXPECT_EQ(parse_socket2_line("urgent>>" + hex64), HyprEvent{hypr::Urgent{hex64}})
+        << "64 digits is the longest address";
+    for (const std::string &bad : {std::string("zz"), std::string("a1-b"), std::string("0x"),
+                                   std::string("0x0xab"), std::string(" ab"), hex65}) {
+        EXPECT_EQ(parse_socket2_line("openwindow>>" + bad + ",1,c,t"), std::nullopt) << bad;
+        EXPECT_EQ(parse_socket2_line("closewindow>>" + bad), std::nullopt) << bad;
+        EXPECT_EQ(parse_socket2_line("urgent>>" + bad), std::nullopt) << bad;
+        EXPECT_EQ(parse_socket2_line("activewindowv2>>" + bad), std::nullopt)
+            << bad << ": an invalid address is not 'nothing focused'";
+    }
+    EXPECT_EQ(parse_socket2_line("activewindowv2>>"), HyprEvent{hypr::ActiveWindowV2{""}})
+        << "empty still means nothing is focused";
+    EXPECT_EQ(parse_socket2_line("activewindowv2>>,"), HyprEvent{hypr::ActiveWindowV2{""}})
+        << "an empty first field is empty too";
 }
 
 TEST(HyprlandParse, SubmapStillParses) {

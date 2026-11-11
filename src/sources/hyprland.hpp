@@ -70,9 +70,10 @@ using HyprEvent = std::variant<hypr::Submap, hypr::WorkspaceV2, hypr::OpenWindow
                                hypr::Fullscreen, hypr::Connected, hypr::Disconnected>;
 
 /// One socket2 line (`EVENT>>DATA`, without the newline) ⇒ the event, or nullopt for an event we
-/// do not use, a malformed line or one longer than 64 KiB. Pure. Fields are split only as far as
-/// needed (the first `>>`, the first `,`), so a title with commas or `>>` cannot shift anything,
-/// and the title is never kept.
+/// do not use, a malformed line (an invalid window address among them: only an empty
+/// `activewindowv2` address means "nothing focused") or one longer than 64 KiB. Pure. Fields are
+/// split only as far as needed (the first `>>`, the first `,`), so a title with commas or `>>`
+/// cannot shift anything, and the title is never kept.
 std::optional<HyprEvent> parse_socket2_line(std::string_view line);
 
 /// The socket2 paths to try, in order: `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/

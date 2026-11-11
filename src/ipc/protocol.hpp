@@ -133,10 +133,12 @@ std::string encode(const Request &r);
 std::expected<Request, std::string> decode_request(std::string_view line);
 
 /// The signal a `notify` or `agent` request reports, nullopt for every other request, and an error
-/// for an unknown urgency or state, and for an `agent` session id that is empty or longer than
-/// `kMaxSessionBytes`. The urgency is case-insensitive. The window is normalized (R8:
-/// lowercase hex, no `0x`), and an empty one (`""` or `0x`) becomes nullopt so that no key is ever
-/// linked to an empty address. `working` and `end` carry no window.
+/// for an unknown urgency or state, for an `agent` session id that is empty or longer than
+/// `kMaxSessionBytes`, and for an `agent` window that is not empty and not an address (see
+/// `normalize_window_address`; a bare `0x` is not one), whatever the state. The urgency is
+/// case-insensitive. The window is normalized (R8: lowercase hex, no `0x`), and an empty one
+/// becomes nullopt so that no key is ever linked to an empty address. `working` and `end` carry no
+/// window.
 std::optional<std::expected<Signal, std::string>> to_signal(const Request &r);
 
 std::string encode(const Response &r);
