@@ -119,7 +119,80 @@ rulings R1 to R13 are in the plan; P1 to P25 below were made during execution. E
 - The empty `SWAYNC_URGENCY` case from the Task 12 and Final deferred minors is fixed in commit
   `ff2ecbc`: `notify-reaction.sh` now passes `"${SWAYNC_URGENCY:-normal}"`, with
   `AgentHook.NotifySnippetFallsBackToNormalWhenSwayncLeavesTheUrgencyEmpty` (RED, then GREEN).
-- Spec §2's claim that the terminal's urgent signal "usually arrives first" on a Claude permission
+- Spec §5.5's claim (and the matching §2 absorb bullet, reworded in the clean-up below) that the terminal's urgent signal "usually arrives first" on a Claude permission
   prompt is corrected: the live run cost 3 writes, so no urgent signal came (Ruling P7 still covers a
   terminal that does ring its bell). The README "enabled = false" wording and the other minors above
   stay open.
+
+## Deferred-minors clean-up (2026-11-11, branch `deferred-minors`)
+
+Five parallel groups worked the list above, then one Opus review of the whole diff (verdict: Ready,
+no Critical or Important findings). Every behavior fix has a test that failed first.
+
+**Fixed (behavior):**
+- Task 5 a: an agent lamp whose zones were emptied by a reload no longer absorbs the attention light.
+- Task 7 2: `LookBook` lowercases the notification app keys itself.
+- Task 6 2 and 3: the zone error names the `zones` key; an unquoted dotted app key is told to be quoted.
+- Task 9 1: the fullscreen fact is lowercased where it enters the model.
+- Task 13 1 and Final 2: a backlight read and the signals that waited for it show in one frame (3 writes
+  became 2); Task 13 3: a reload that turns reactions off drops the signals waiting for a read.
+- Task 14 1: a focus change never carries the previous window's class; Task 14 4: a Hyprland disconnect
+  clears the facade's focus (chain test in `test_reactions.cpp`); Task 14 2 and Final 4: the tail of an
+  oversized socket2 line is discarded, not parsed as a line.
+- Task 14 5 and Task 12 2: a window address is 1 to 64 hex digits, anything else is invalid at every caller
+  (`waiting` and `done` refuse a bad `--window`, `working` and `end` ignore it).
+- Task 15 1: a non-UTF-8 title no longer fails the fullscreen query (`src/util/utf8.hpp`); Final 3: one retry
+  about 600 ms after a failed query while the fact names a fullscreen app.
+- Task 16 1: the hook exits at once when stdin is closed (`{ : 3<&0; }`; the brief's `<&0` form does not
+  work in bash); the hook also omits an address of more than 64 digits.
+- Review Minor 1: `working` and `end` ignore a bad `--window` in both the CLI and `to_signal`.
+
+**Fixed (tests, refactors, docs):** Task 3, 4, 5, 7, 8, 9, 10, 11, 13 and 14 test gaps and comments; one shared
+`tomlr::sub_table` and `OMENKBD_TRY`; the reactions snippet parsed in a user-shaped config (Final 1); the
+`exit_code_of` guard (Final fix B); README (slow-effect fps rule, `enabled = false`, waiting cost, hook timing,
+`--window` rule); the spec's header, API lists, pending-signal and absorb text, and live-check 4 result.
+
+**Closed without work:** Task 12 1 (Fix B), Task 12 5 and Final 8 (`ff2ecbc`), Task 10 3 (guards already
+existed; pin tests added), Task 10 1 (already fixed on main by `cb925c1`).
+
+**Declined, with the reason:**
+- Task 2 (both) and the Task 3 report items: plan-text and process notes; documented, deliberate.
+- Task 4 1: contradicts Ruling P6 (`clear()` stays a full reset). Task 5 b: ruled acceptable.
+- Task 5 c, e, f and Task 10 2, 5, 7: callers expire first, trivial cost or unreachable.
+- Task 11 1 and 3: spec-documented or moot; Task 11 4 `playing` broadcast churn: benign.
+- Task 13 2: no deterministic failing test exists (the extra frame mostly moves the tick phase).
+- Task 14 7 and urgent-set cap, Task 15 5: unverifiable here, bounded, unreachable with the R13 dedupe.
+- Task 16 2 (negative cache would invert `AFailedWindowLookupIsNotCached`), 5, 7, and a leading comment for the
+  JSON snippet (JSON cannot carry one).
+
+**Rulings made during the clean-up:**
+- Ruling: after a successful read the waiting signals are applied before `release_probe_waiters()`. — a
+  waiting `status` or `toggle` then sees them, and the read plus its signals cost one frame — cost if wrong:
+  swap two lines. (G3; the reviewer agreed.)
+- Ruling: Task 13 2 is declined (see above). (G3; the reviewer agreed.)
+- Ruling: a bare `0x` is invalid everywhere, not "no window". (G4; the reviewer agreed.)
+- Ruling: an invalid `--window` is refused only for `waiting` and `done`. — G4 had refused it for every
+  state; the review showed a wrapper that always adds `--window` could then not clear a lamp for an hour —
+  cost if wrong: re-widen two checks.
+- Ruling: the `--window` validator is a check in the `agent` callback (still exit 64), not an option
+  validator, so it can see the state. (controller)
+- Ruling: T6 3's hint appears only for a dotted key written on one line; a dotted table header keeps the
+  plain message. (G2)
+- Ruling: T9 3 keeps an empty class in `fullscreen_app` accepted (it matches only a window whose class is
+  empty), pinned by a test. (G2)
+- Ruling: T10 1 gets no new test: the fix was already on main. (G1)
+- Ruling: the hook guard is `{ : 3<&0; }`, because bash accepts `<&0` on a closed fd 0. (G5)
+- Ruling: the reviewer's "declined to judge" items stand as assumptions: Hyprland sends `activewindow` before
+  `activewindowv2` (seen in the Task 1 socket2 spike log) and an empty `activewindowv2>>` means nothing
+  focused (assumed: the spike never recorded an empty one); the
+  dotted-key detection relies on the vendored toml++ source positions; the `3<&0` guard is plain redirection
+  and not bash-version specific; Hyprland's newline handling in titles (Task 14 7) is unverified.
+
+**Still open (new from the review, all Minor):**
+- A malformed `activewindowv2` (invalid address, dropped by the parser) leaves the class from the preceding
+  `activewindow` line pending, so the next valid focus could carry it. Hyprland never sends one.
+- `Hyprland.TheTailOfAnOversizedLineIsNotALine` passes on the old code too if the reader has not drained the
+  65,537 bytes within 200 ms (no flake, but no teeth under load).
+- `HyprlandBridge.ADisconnectCancelsAPendingRetry` would still pass without the cancel (the source reconnects
+  later than the retry); the other two cancel paths are pinned.
+- The `window_or_none` guard in `Reactions` stays defense in depth: no test can fail without it.
