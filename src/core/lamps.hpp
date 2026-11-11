@@ -53,8 +53,8 @@ class LampSet {
     /// Lights `kind` for `key`, linked to `window` when given. A kind that had no keys starts an
     /// intro at `now` when `play_intro` is set; a kind already lit never does. Raising a key the
     /// kind already holds refreshes its TTL, after the window rules below have run for it (a held
-    /// `Agent` key raised again still drops the `Urgent` keys of its window). Ignored when the kind
-    /// has no zones: it changes nothing.
+    /// `Agent` key raised again still drops the `Urgent` keys of its window), unless a rule ignores
+    /// the raise. Ignored when the kind has no zones: it changes nothing.
     ///
     /// A kind holds at most `kMaxKeysPerKind` keys: a new key raised past that evicts the kind's
     /// oldest one first (the smallest `raised_at`; on a tie the smallest key), with its window
