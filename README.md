@@ -136,8 +136,9 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
   keyboard is visible again.
 - **On top of a running effect** reactions add no writes: the effect's own ticks carry them, so a
   step may land up to one tick late (about 100 ms). An animated profile samples reactions only at
-  its ticks. At about 8 fps or below a tick (125 ms or more) is longer than a 120 ms step, so a
-  pulse can fall between two ticks and never show (0 writes). The default `fps = 10` is fast enough.
+  its ticks. A step shorter than one tick (1000 / `fps` ms) can fall between two ticks and never
+  show (0 writes): with the default `step_ms = 120`, that happens at about 8 fps or below. The
+  default `fps = 10` is fast enough for it.
 - **Claude lamp and focus.** For a session started directly in a terminal, the hook reports that
   terminal's Hyprland window. The lamp then does not light while that terminal is focused, clears
   when you focus it, and the "finished" flash is skipped while it is focused. Background and nested

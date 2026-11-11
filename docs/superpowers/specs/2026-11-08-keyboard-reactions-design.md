@@ -37,8 +37,8 @@ window in three ways:
 - it clears #7 on focus;
 - it keeps one light per window (§5.5): the lamp **absorbs an urgent signal from the same
   window**, and a lamp raised for a window replaces the attention light (#4) that window already
-  has. If the terminal also rings its bell, it can mark itself urgent about 6 s before the hook
-  reports the prompt: the attention light then shows first and the agent lamp replaces it, so one
+  has. If the terminal also rings its bell, it can mark itself urgent before the hook reports the
+  prompt (the gap was not measured, it did not happen live): the attention light then shows first and the agent lamp replaces it, so one
   steady light remains for one event. If the hook comes first, the urgent signal is absorbed.
   Claude Code did not ring the bell in the live check (2026-11-11), so a waiting episode cost 3 + 1.
 
@@ -276,7 +276,9 @@ model the way submaps do today.
   - `layer(now) -> LayerOps`
   - `next_change(now) -> std::optional<TimePoint>`
   - `advance(now)`
-  - `clear()`
+  - `clear()`, a full reset (it also forgets the rate and cooldown history; Ruling P6)
+  - `playing() -> std::optional<Channel>`
+  - `set_limits(PlayerLimits)`, which `LookBook::limits()` fills from the config
 
 ### 5.5 LampSet: lights that hold (`src/core/lamps.hpp`)
 
@@ -330,11 +332,14 @@ model the way submaps do today.
     the focused class matches the app the same way.
 - `Reactions` (pure façade, owned by `Model`; `src/daemon/reactions.hpp`):
   - `on_signal(const Signal &, now, Visibility)`
+  - `update(now, Visibility)`, once per frame before `layers`: expires lamps, advances the player and
+    takes the new visibility
   - `layers(now) -> {LayerOps lamps, LayerOps transient}`
-  - `next_change(now)`
+  - `next_change()`, the boundary cached by `on_signal` and `update` (R7); `visibility_differs(Visibility)`
   - `suppress()`, which clears the short clips when the keyboard goes dark or the user leaves
-  - `reconfigure(const ReactionsCfg &)`, called on `reload`. Lamps keep their keys; a playing clip
-    finishes with its old look.
+  - `reconfigure(const ReactionsCfg &, const Resolver &)`, called on `reload`. Lamps keep their keys; a
+    playing clip finishes with its old look. `restyle(const Resolver &)` re-resolves the colors after a
+    theme switch and keeps all state.
   - `status()`
 - `Visibility` is computed by `Model` from what it already has:
   - `keyboard_visible = !suspended && backlight_wanted() && effective_brightness > 0 && hw_backlight != false && !budget_exhausted`
@@ -473,6 +478,7 @@ color = "theme:blue"
 critical = "theme:red"
 min_urgency = "normal"   # "low" | "normal" | "critical"
 skip_if_focused = true
+# quote keys that contain dots: "com.example.app" = "theme:blue"
 [reactions.notify.apps]  # matched case-insensitively (§5.6)
 zapzap = "theme:green"
 discord = "#5865f2"
@@ -615,8 +621,11 @@ ttl_s = 3600             # (60–86400)
 
    - a background job that waits while the terminal **is** focused still lights the lamp.
 
-   Also note whether the prompt makes Alacritty urgent. If it does, the absorb rule must keep the
-   right zone dark.
+   Also note whether the prompt makes Alacritty urgent. If it does, the attention light shows first and
+   the agent lamp replaces it (§2, §5.5).
+
+   **Done 2026-11-11** (`docs/hardware-notes.md`, "Reactions live checks"): every write count matched §2.
+   A real permission prompt did not make the terminal urgent (3 + 1); a bell does raise `urgent`.
 
 ## 9. Left to the builder
 
