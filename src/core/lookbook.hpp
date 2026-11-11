@@ -27,7 +27,9 @@ using Resolver = std::function<Rgb(const ColorRef &)>;
 class LookBook {
   public:
     /// Resolves every color of `cfg` now, once each, and keeps no reference to either argument.
-    /// `cfg` is in range, as `parse_reactions` guarantees, and its app keys are lowercase.
+    /// `cfg` is in range, as `parse_reactions` guarantees. Its app keys may have any case: the look
+    /// book lowercases them itself. Of two keys that are equal once lowercased it keeps the one
+    /// that sorts first and ignores the other silently (the parser rejects such a table).
     LookBook(const ReactionsCfg &cfg, const Resolver &resolve);
 
     /// The sweep for a switch from workspace `from` to `to`: `Up` when `to > from`, else `Down`.

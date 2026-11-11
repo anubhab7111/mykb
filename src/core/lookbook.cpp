@@ -18,7 +18,11 @@ std::map<std::string, Rgb, std::less<>>
 resolve_apps(const std::map<std::string, ColorRef, std::less<>> &apps, const Resolver &resolve) {
     std::map<std::string, Rgb, std::less<>> out;
     for (const auto &[key, color] : apps) {
-        out.emplace(key, resolve(color));
+        // Keys are matched in lowercase, so lowercase them here instead of trusting the caller.
+        // When two keys collide, `emplace` keeps the first one: `apps` is ordered, so that is the
+        // key that sorts first ("ZapZap" before "zapzap"), and the other is dropped silently. Its
+        // color is still resolved, so every color of the settings is resolved exactly once.
+        out.emplace(to_lower(key), resolve(color));
     }
     return out;
 }
