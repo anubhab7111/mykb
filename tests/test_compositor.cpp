@@ -161,6 +161,83 @@ TEST(Compositor, BrightnessScalesLampsAndTransient) {
     EXPECT_EQ(compose(i, 0.0).zones, (Frame{half, half, Rgb{0, 0, 128}, half}));
 }
 
+TEST(Compositor, BrightnessZeroBlanksTheLayersAndTurnsTheBacklightOff) {
+    constexpr Rgb lamp{255, 128, 0};
+    constexpr Rgb flash{0, 255, 255};
+    Inputs i = inputs();
+    i.brightness = 0;
+    i.effect = Effect::Wave;
+    i.animate = true;
+    i.lamps = layer(Zone::Wasd, Paint{lamp});
+    i.transient = layer(Zone::Left, Paint{flash});
+    const Output out = compose(i, 0.5);
+    EXPECT_FALSE(out.backlight);
+    EXPECT_FALSE(out.animated) << "reactions never animate, and the dark frame is not animated";
+    EXPECT_EQ(out.zones, (Frame{kBlack, kBlack, kBlack, kBlack}))
+        << "the layers are scaled to black";
+}
+
+TEST(Compositor, ABacklightInputOfFalseStillComposesTheLayersButGatesTheOutput) {
+    constexpr Rgb lamp{255, 128, 0};
+    constexpr Rgb flash{0, 255, 255};
+    Inputs i = inputs();
+    i.backlight = false;
+    i.lamps = layer(Zone::Wasd, Paint{lamp});
+    i.transient = layer(Zone::Left, Paint{flash});
+    const Output out = compose(i, 0.0);
+    EXPECT_FALSE(out.backlight);
+    EXPECT_FALSE(out.animated);
+    // Only the flag drops: the zones are still the composed frame, layers included.
+    EXPECT_EQ(out.zones, (Frame{flash, G, B, lamp}));
+
+    i.backlight = true;
+    EXPECT_TRUE(compose(i, 0.0).backlight);
+    EXPECT_EQ(compose(i, 0.0).zones, out.zones);
+}
+
+TEST(Compositor, MixInTheTransientLayerBlendsTheFrameBelowIt) {
+    constexpr Rgb h{100, 50, 200};
+    Inputs i = inputs();
+    i.transient = layer(Zone::Middle, Mix{kWhite, 0.5});
+    EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, Rgb::lerp(G, kWhite, 0.5), B, W}))
+        << "the other zones show what is below";
+
+    // On top of the hint and of a lamp: it blends whatever the frame holds at that point.
+    i.hint = h;
+    EXPECT_EQ(compose(i, 0.0).zones, (Frame{h, Rgb::lerp(h, kWhite, 0.5), h, h}));
+    i.hint = std::nullopt;
+    i.lamps = layer(Zone::Middle, Paint{Rgb{200, 0, 0}});
+    EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, Rgb::lerp(Rgb{200, 0, 0}, kWhite, 0.5), B, W}));
+
+    // Brightness scales the blended result.
+    i.brightness = 50;
+    EXPECT_EQ(compose(i, 0.0).zones[1], Rgb::lerp(Rgb{200, 0, 0}, kWhite, 0.5).scale(50));
+}
+
+TEST(Compositor, ScaleAndMixInTheLampsLayerWorkOnTheOverlaidProfile) {
+    Inputs i = inputs();
+    i.overlay = ResolvedTint{kBlack, 0.5};
+    const Rgb tinted_blue = Rgb::lerp(B, kBlack, 0.5);
+    const Rgb tinted_red = Rgb::lerp(R, kBlack, 0.5);
+
+    // A lamp is not only a paint: a Scale dims the zone it covers ...
+    i.lamps = layer(Zone::Right, Scale{0.5});
+    Frame z = compose(i, 0.0).zones;
+    EXPECT_EQ(z[2], multiply(tinted_blue, 0.5));
+    EXPECT_EQ(z[0], tinted_red) << "a zone without an op keeps the overlaid profile";
+
+    // ... and a Mix pulls it toward a color.
+    i.lamps = layer(Zone::Left, Mix{kWhite, 0.25});
+    z = compose(i, 0.0).zones;
+    EXPECT_EQ(z[0], Rgb::lerp(tinted_red, kWhite, 0.25));
+    EXPECT_EQ(z[2], tinted_blue);
+
+    // The hint still replaces the lamp layer, whatever its op.
+    constexpr Rgb h{100, 50, 200};
+    i.hint = h;
+    EXPECT_EQ(compose(i, 0.0).zones, (Frame{h, h, h, h}));
+}
+
 TEST(Compositor, ReactionsNeverMakeTheFrameAnimated) {
     constexpr Rgb lamp{255, 128, 0};
     constexpr Rgb flash{0, 255, 255};

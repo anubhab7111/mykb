@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <string>
 
 using namespace omenkbd;
@@ -215,6 +216,47 @@ TEST(ClipPlayer, TheRollingMinuteSlidesOneStartAtATime) {
     EXPECT_EQ(p.offer(Channel::Workspace, flash_clip(), t0 + 60s), Offer::Started);
     EXPECT_EQ(p.offer(Channel::Workspace, flash_clip(), t0 + 60s + 500ms), Offer::Dropped);
     EXPECT_EQ(p.offer(Channel::Workspace, flash_clip(), t0 + 70s), Offer::Started);
+}
+
+TEST(ClipPlayer, ABusyDropLeavesTheRateBudgetUntouched) {
+    // Three starts fit in the minute. A drop between them must not use up a slot.
+    ClipPlayer p{limits(3, 0ms, 0ms)};
+    EXPECT_EQ(p.offer(Channel::Workspace, sweep_clip(), t0), Offer::Started);
+    EXPECT_EQ(p.offer(Channel::Workspace, flash_clip(), t0 + 100ms), Offer::Dropped) << "busy";
+    EXPECT_EQ(p.offer(Channel::Window, flash_clip(), t0 + 200ms), Offer::Dropped) << "busy";
+    EXPECT_EQ(p.offer(Channel::Workspace, flash_clip(), t0 + 1s), Offer::Started);
+    // Two starts and two drops so far: a third start still fits, a fourth does not.
+    EXPECT_EQ(p.offer(Channel::Workspace, flash_clip(), t0 + 2s), Offer::Started);
+    EXPECT_EQ(p.offer(Channel::Workspace, flash_clip(), t0 + 3s), Offer::Dropped) << "the limit";
+}
+
+TEST(ClipPlayer, ACooldownDropLeavesTheRateBudgetUntouched) {
+    ClipPlayer p{limits(3, 500ms, 0ms)};
+    EXPECT_EQ(p.offer(Channel::Window, flash_clip(), t0), Offer::Started);
+    // The 150 ms clip is over, so only the window cooldown drops these two.
+    EXPECT_EQ(p.offer(Channel::Window, flash_clip(), t0 + 200ms), Offer::Dropped) << "cooldown";
+    EXPECT_EQ(p.offer(Channel::Window, flash_clip(), t0 + 400ms), Offer::Dropped) << "cooldown";
+    EXPECT_EQ(p.offer(Channel::Window, flash_clip(), t0 + 1s), Offer::Started);
+    // Two starts and two drops so far: a third start still fits, a fourth does not.
+    EXPECT_EQ(p.offer(Channel::Window, flash_clip(), t0 + 2s), Offer::Started);
+    EXPECT_EQ(p.offer(Channel::Window, flash_clip(), t0 + 3s), Offer::Dropped) << "the limit";
+}
+
+TEST(ClipPlayer, AZeroRateLimitStartsNothingAndQueuesNothing) {
+    // The config range is 1 to 600, so this is only a safety pin: 0 starts no clip on any channel.
+    ClipPlayer p{limits(0, 500ms, 150ms)};
+    for (const Channel c :
+         {Channel::Workspace, Channel::Window, Channel::Notify, Channel::AgentDone}) {
+        SCOPED_TRACE(std::string(name(c)));
+        EXPECT_EQ(p.offer(c, flash_clip(), t0), Offer::Dropped);
+        EXPECT_FALSE(p.playing().has_value());
+        EXPECT_FALSE(p.next_change(t0).has_value());
+        EXPECT_TRUE(empty(p.layer(t0)));
+    }
+
+    // Nothing was counted or kept: a limit raised later lets the next offer start.
+    p.set_limits(limits(1, 500ms, 150ms));
+    EXPECT_EQ(p.offer(Channel::Notify, flash_clip(), t0 + 1s), Offer::Started);
 }
 
 TEST(ClipPlayer, AClipThatCannotStartForTheRateLimitIsNotQueued) {
