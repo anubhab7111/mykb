@@ -12,7 +12,31 @@
 #include <toml++/toml.hpp>
 #include <type_traits>
 
+/// Runs `expr`, a `std::expected<_, std::string>`, and returns its error from the calling function,
+/// whose own result must be an `std::expected<_, std::string>`.
+#define OMENKBD_TRY(expr)                                                                          \
+    do {                                                                                           \
+        if (auto _r = (expr); !_r) {                                                               \
+            return std::unexpected(_r.error());                                                    \
+        }                                                                                          \
+    } while (false)
+
 namespace omenkbd::tomlr {
+
+/// `t[key]` as a table; missing => nullptr; present but not a table => error (prefixed with
+/// `where` when that is not empty).
+inline std::expected<const toml::table *, std::string>
+sub_table(const toml::table &t, std::string_view key, std::string_view where = {}) {
+    const toml::node *n = t.get(key);
+    if (n == nullptr) {
+        return nullptr;
+    }
+    if (!n->is_table()) {
+        return std::unexpected(where.empty() ? std::format("`{}` must be a table", key)
+                                             : std::format("{}: `{}` must be a table", where, key));
+    }
+    return n->as_table();
+}
 
 /// Error ``unknown field `<key>` `` (prefixed with `where`) for any key not in `allowed`.
 inline std::expected<void, std::string> check_keys(const toml::table &t,

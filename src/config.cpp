@@ -18,30 +18,11 @@ namespace {
 using tomlr::check_keys;
 using tomlr::opt;
 using tomlr::opt_int_in;
+using tomlr::sub_table;
 
 constexpr std::array<std::string_view, 4> kModifierOrder{"super", "ctrl", "alt", "shift"};
 
 using Err = std::unexpected<std::string>;
-
-#define OMENKBD_TRY(expr)                                                                          \
-    do {                                                                                           \
-        if (auto _r = (expr); !_r) {                                                               \
-            return Err(_r.error());                                                                \
-        }                                                                                          \
-    } while (false)
-
-/// `t[key]` as a table; missing ⇒ nullptr; present but not a table ⇒ error.
-std::expected<const toml::table *, std::string> sub_table(const toml::table &t,
-                                                          std::string_view key) {
-    const toml::node *n = t.get(key);
-    if (n == nullptr) {
-        return nullptr;
-    }
-    if (!n->is_table()) {
-        return Err(std::format("`{}` must be a table", key));
-    }
-    return n->as_table();
-}
 
 std::expected<GateAction, std::string> gate_action(std::string_view s, std::string_view field) {
     const std::string v = to_lower(s);
@@ -59,9 +40,9 @@ std::expected<GateAction, std::string> gate_action(std::string_view s, std::stri
 
 std::expected<void, std::string> parse_device(const toml::table &t, DeviceCfg &out) {
     OMENKBD_TRY(check_keys(t, {"zone_map"}, "device"));
-    auto zm = sub_table(t, "zone_map");
+    auto zm = sub_table(t, "zone_map", "device");
     if (!zm) {
-        return Err("device: " + zm.error());
+        return Err(zm.error());
     }
     if (*zm == nullptr) {
         return {};
@@ -204,9 +185,9 @@ std::expected<void, std::string> parse_hints(const toml::table &t, HintsCfg &out
     }
     for (auto [key, target, mods] :
          {std::tuple{"modifiers", &out.modifiers, true}, {"submaps", &out.submaps, false}}) {
-        auto sub = sub_table(t, key);
+        auto sub = sub_table(t, key, "hints");
         if (!sub) {
-            return Err("hints: " + sub.error());
+            return Err(sub.error());
         }
         if (*sub != nullptr) {
             auto m = parse_color_map(**sub, std::format("hints.{}", key), mods);
