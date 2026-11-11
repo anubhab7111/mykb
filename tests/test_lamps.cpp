@@ -410,6 +410,27 @@ TEST(LampSet, UrgentRaiseForAWindowThatHasAnAgentKeyIsAbsorbed) {
     EXPECT_TRUE(empty(lamps.layer(t0 + 1min + 150ms)));
 }
 
+TEST(LampSet, AnAgentKindWithNoZonesDoesNotAbsorbUrgentRaises) {
+    LampSet lamps = styled();
+    lamps.raise(LampKind::Agent, "a1", "w1", t0, false);
+    // Restyled to no zones: the agent key stays, but its lamp cannot show. It must not swallow the
+    // attention light of its window.
+    LampStyle off = agent_style();
+    off.zones.clear();
+    lamps.set_style(LampKind::Agent, off);
+    ASSERT_EQ(lamps.key_count(LampKind::Agent), 1U);
+
+    lamps.raise(LampKind::Urgent, "u1", "w1", t0 + 1s, false);
+    EXPECT_EQ(lamps.active(), kinds({LampKind::Agent, LampKind::Urgent}));
+    EXPECT_EQ(lamps.key_count(LampKind::Urgent), 1U);
+    EXPECT_EQ(lamps.layer(t0 + 1s), lit(kUrgent, {Zone::Left, Zone::Middle, Zone::Right}));
+
+    // The rule follows the style in force: with its zones back the agent lamp absorbs again.
+    lamps.set_style(LampKind::Agent, agent_style());
+    lamps.raise(LampKind::Urgent, "u2", "w1", t0 + 2s, false);
+    EXPECT_EQ(lamps.key_count(LampKind::Urgent), 1U) << "u2 was absorbed";
+}
+
 TEST(LampSet, AgentWinsASharedZone) {
     LampSet lamps;
     LampStyle agent = agent_style();

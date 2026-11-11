@@ -60,10 +60,13 @@ class LampSet {
     /// link. The kind stays lit through it, so the intro and the paint do not change.
     ///
     /// A window shows one light, the `Agent` one:
-    ///   - an `Urgent` raise is ignored when an `Agent` key already carries its `window`;
+    ///   - an `Urgent` raise is ignored when an `Agent` key already carries its `window`, unless
+    ///     the `Agent` kind has no zones: its lamp cannot show, so it absorbs nothing;
     ///   - an `Agent` raise drops every `Urgent` key carrying its `window`, whether the key is new
     ///     or already held.
-    /// So a window never holds keys of both kinds. A raise without a window never meets a rule.
+    /// So a window never holds keys of both kinds, except when `set_style` emptied the `Agent`
+    /// zones while its key was held and an `Urgent` raise came in meanwhile. A raise without a
+    /// window never meets a rule.
     void raise(LampKind kind, std::string key, std::optional<std::string> window, TimePoint now,
                bool play_intro);
 
