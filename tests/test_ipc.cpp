@@ -204,14 +204,29 @@ TEST(Ipc, ToSignalAcceptsUrgencyInAnyCase) {
 
 TEST(Ipc, ToSignalMapsAnEmptyWindowToNone) {
     // R8 and the Task 10 review: no key may ever be linked to an empty address.
-    for (const char *empty : {"", "0x", "0X"}) {
-        EXPECT_EQ(signal_of(agent_request("waiting", empty)),
-                  (Signal{signal::AgentWaiting{"s", std::nullopt}}))
-            << '"' << empty << '"';
-        EXPECT_EQ(signal_of(agent_request("done", empty)),
-                  (Signal{signal::AgentDone{"s", std::nullopt}}))
-            << '"' << empty << '"';
+    EXPECT_EQ(signal_of(agent_request("waiting", "")),
+              (Signal{signal::AgentWaiting{"s", std::nullopt}}));
+    EXPECT_EQ(signal_of(agent_request("done", "")), (Signal{signal::AgentDone{"s", std::nullopt}}));
+}
+
+// T14-5 and T12-2: a window that is given but is not 1 to 64 hex digits (after an optional `0x`)
+// is an error, for every state, so a typo never becomes a lamp nobody can dismiss by focus.
+TEST(Ipc, ToSignalRejectsAnInvalidWindow) {
+    const std::string hex64(64, 'a');
+    EXPECT_EQ(signal_of(agent_request("waiting", "0x" + hex64)),
+              (Signal{signal::AgentWaiting{"s", hex64}}))
+        << "64 digits is the longest address";
+    for (const char *state : {"waiting", "working", "done", "end"}) {
+        for (const std::string &bad :
+             {std::string("0x"), std::string("0X"), std::string("zz"), std::string("w1"),
+              std::string("0x0xab"), std::string("0xab "), std::string(65, 'a')}) {
+            const std::string error = signal_error_of(agent_request(state, bad));
+            EXPECT_NE(error.find("invalid window address"), std::string::npos)
+                << state << " \"" << bad << "\": " << error;
+        }
     }
+    // A bad state keeps its own error.
+    EXPECT_NE(signal_error_of(agent_request("sleeping", "zz")).find("sleeping"), std::string::npos);
 }
 
 TEST(Ipc, ToSignalRejectsABadStateOrUrgency) {

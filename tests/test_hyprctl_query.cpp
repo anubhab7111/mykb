@@ -152,6 +152,22 @@ TEST(HyprctlQuery, GarbageNeverThrowsAndNeverMakesAWindow) {
     }
 }
 
+// T14-5: an address that is not 1 to 64 hex digits is not a window, so the reply is a failed
+// answer (the bridge keeps the fact), never "nothing focused".
+TEST(HyprctlQuery, AnInvalidAddressIsAFailedAnswer) {
+    const auto reply = [](const std::string &address) {
+        return R"({"address":")" + address + R"(","class":"mpv","fullscreen":2})";
+    };
+    const std::string hex64(64, 'a');
+    EXPECT_EQ(parse_active_window(reply("0x" + hex64)), (ActiveWindowInfo{hex64, "mpv", 2}))
+        << "64 digits is the longest address";
+    for (const std::string &bad :
+         {std::string("zz"), std::string("0xzz"), std::string("a1-b"), std::string("0x0xab"),
+          std::string(" 0xab"), std::string(65, 'a')}) {
+        EXPECT_EQ(parse_active_window(reply(bad)), std::nullopt) << bad;
+    }
+}
+
 TEST(HyprctlQuery, TrueFullscreenIsTheFullscreenBitOfHyprlandsMode) {
     static_assert(!is_true_fullscreen(0), "no fullscreen");
     static_assert(!is_true_fullscreen(1), "maximized is not fullscreen");

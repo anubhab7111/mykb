@@ -33,7 +33,8 @@ std::optional<int> parse_id(std::string_view s) {
     return id;
 }
 
-/// An event that names a window and nothing else we keep; a missing address makes it malformed.
+/// An event that names a window and nothing else we keep; a missing or invalid address makes it
+/// malformed.
 template <class E> std::optional<HyprEvent> with_address(std::string_view data) {
     std::string address = normalize_window_address(before_comma(data));
     if (address.empty()) {
@@ -79,7 +80,11 @@ std::optional<HyprEvent> parse_socket2_line(std::string_view line) {
         return HyprEvent{hypr::ActiveWindow{std::string(before_comma(data))}};
     }
     if (name == "activewindowv2") {
-        return HyprEvent{hypr::ActiveWindowV2{normalize_window_address(before_comma(data))}};
+        // Empty means nothing is focused; an invalid address must not pass for that.
+        if (before_comma(data).empty()) {
+            return HyprEvent{hypr::ActiveWindowV2{""}};
+        }
+        return with_address<hypr::ActiveWindowV2>(data);
     }
     if (name == "fullscreen" && (data == "0" || data == "1")) {
         return HyprEvent{hypr::Fullscreen{data == "1"}};

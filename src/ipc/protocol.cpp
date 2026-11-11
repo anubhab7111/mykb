@@ -28,15 +28,18 @@ template <class T> std::optional<T> opt_get(const ojson &j, const char *key) {
     return j.at(key).get<T>();
 }
 
-/// R8: the request's window in the daemon's canonical form. An empty address (`""` or a bare `0x`)
-/// names no window.
-std::optional<std::string> normalized_window(const std::optional<std::string> &window) {
-    if (!window) {
+/// R8: the request's window in the daemon's canonical form; nullopt for none or an empty one, an
+/// error for one that is not an address (T14-5).
+std::expected<std::optional<std::string>, std::string>
+normalized_window(const std::optional<std::string> &window) {
+    if (!window || window->empty()) {
         return std::nullopt;
     }
     std::string address = normalize_window_address(*window);
     if (address.empty()) {
-        return std::nullopt;
+        return std::unexpected(
+            std::format("invalid window address \"{}\" (1 to {} hex digits, optionally after 0x)",
+                        *window, kMaxWindowAddressDigits));
     }
     return address;
 }
@@ -262,14 +265,18 @@ std::optional<std::expected<Signal, std::string>> to_signal(const Request &r) {
             return Result(std::unexpect, std::format("session id must be 1 to {} bytes, got {}",
                                                      kMaxSessionBytes, a->session.size()));
         }
+        auto window = normalized_window(a->window);
+        if (!window) {
+            return Result(std::unexpect, std::move(window.error()));
+        }
         if (a->state == "waiting") {
-            return Result(signal::AgentWaiting{a->session, normalized_window(a->window)});
+            return Result(signal::AgentWaiting{a->session, std::move(*window)});
         }
         if (a->state == "working") {
             return Result(signal::AgentWorking{a->session});
         }
         if (a->state == "done") {
-            return Result(signal::AgentDone{a->session, normalized_window(a->window)});
+            return Result(signal::AgentDone{a->session, std::move(*window)});
         }
         return Result(signal::AgentEnded{a->session});
     }
