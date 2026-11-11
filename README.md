@@ -117,7 +117,7 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
 | Attention light | A window that is not focused asks for attention (Hyprland `urgent`) | The right zone in `theme:yellow` blinks twice, then holds steady until every such window has been focused or closed. | 4 per episode |
 | Fullscreen video | The focused window is in true fullscreen and its class is in the rule's list (`mpv`, `vlc`, `firefox`, `chromium`) | Brightness is capped at 15% by a rule. Super+F only maximizes and does not count. | 1 in, 1 out |
 | Notification flash | swaync receives a notification | Every zone blinks once for 150 ms: `theme:red` if critical, the app's color from a table (ZapZap `theme:green`, Discord `#5865f2`), otherwise `theme:blue`. | 2 |
-| Claude lamp: waiting | A Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then holds steady until the session continues, finishes or ends. | 4 per episode |
+| Claude lamp: waiting | A Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then holds steady until the session continues, finishes or ends. | 4 per episode, 0 if you are looking at a linked session |
 | Claude lamp: finished | A Claude Code session finishes its turn | WASD blinks once for 150 ms in `theme:green`. | 2 |
 
 - **Holding costs nothing.** The two waiting lights (attention, Claude) blink and then hold a steady
@@ -129,13 +129,15 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
 - **Silent cases cost 0 writes.** Reactions are off; the keyboard is dark (backlight off after the
   Fn key, brightness 0, lid closed, locked or idle with the gate set to `off`, suspended); or the
   hourly write budget is spent. The daemon cannot see the Fn key, so a reaction within 5 s of an Fn
-  press can still write unseen (its backlight reading is up to 5 s old). The short reactions also
-  stay silent while you are away (locked or idle) and are dropped, not saved. Notifications are
-  skipped during do-not-disturb, for low urgency, and when the notifying app is the focused window.
-  A lamp keeps its state while silent and shows steady, with no blinks, when the keyboard is
-  visible again.
+  press can still write unseen (the daemon's backlight reading can be up to 5 s old). The short
+  reactions also stay silent while you are away (locked or idle) and are dropped, not saved.
+  Notifications are skipped during do-not-disturb, for low urgency, and when the notifying app is
+  the focused window. A lamp keeps its state while silent and shows steady, with no blinks, when the
+  keyboard is visible again.
 - **On top of a running effect** reactions add no writes: the effect's own ticks carry them, so a
-  step may land up to one tick late (about 100 ms).
+  step may land up to one tick late (about 100 ms). An animated profile samples reactions only at
+  its ticks. At about 8 fps or below a tick (125 ms or more) is longer than a 120 ms step, so a
+  pulse can fall between two ticks and never show (0 writes). The default `fps = 10` is fast enough.
 - **Claude lamp and focus.** For a session started directly in a terminal, the hook reports that
   terminal's Hyprland window. The lamp then does not light while that terminal is focused, clears
   when you focus it, and the "finished" flash is skipped while it is focused. Background and nested
@@ -151,9 +153,12 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
 - **Layers, bottom to top:** profile or effect, rule overlay, lamps, mode hint (Super, Ctrl,
   submap), short reaction, brightness caps and the backlight gates. A held modifier hides the lamps
   while it is held; a notification during fullscreen video flashes at the dimmed brightness.
-- **Turning things off.** `enabled = false` turns everything off. One reaction goes off with its own
-  neutral value: `open = 0`, `close = 1`, or `blinks = 0` together with `zones = []`. Colors are
-  `#rrggbb` or `theme:<name>`.
+- **Turning things off.** `enabled = false` turns the reactions off: their signals are dropped
+  before any backlight read, so they cost no read and no write. The fullscreen dim is a rule, not a
+  reaction, so it keeps working. Delete the rule `fullscreen video dims` to switch it off (with no
+  `fullscreen_app` rule left, the daemon stops asking Hyprland about fullscreen). One reaction goes
+  off with its own neutral value: `open = 0`, `close = 1`, or `blinks = 0` together with
+  `zones = []`. Colors are `#rrggbb` or `theme:<name>`.
 - **What is never read or kept.** Keystrokes, window titles, notification text, Claude prompts and
   replies. Only a window's address and class are used, in memory. The Hyprland parser drops titles
   before anything else sees them, and nothing from Hyprland, swaync or Claude Code is logged except
@@ -200,8 +205,11 @@ omen-kbd never edits these files itself.
     the `SessionStart` hook. Do not paste the file after the closing brace: two top-level objects
     are not valid JSON (`jq -s length ~/.claude/settings.json` must print `1`). Only sessions
     started after the change read it. The three busy events (`UserPromptSubmit`, `PostToolUse`, `PostToolUseFailure`) run with
-    `"async": true`, so the hook cannot slow Claude Code. Every `omen-kbd` and `hyprctl` call
-    inside it is capped at about 1 s (1.5 s worst case).
+    `"async": true`, so the hook cannot slow Claude Code. `Notification`, `Stop` and `SessionEnd`
+    stay synchronous, so the waiting, done and end signals keep their order. Every `omen-kbd` and
+    `hyprctl` call inside the hook is capped at about 1 s (1.5 s worst case). A synchronous
+    `Notification` or `Stop` hook that has to look up the window runs `hyprctl` and then
+    `omen-kbd`, so its worst case is about 3 s.
 
 `omen-kbd doctor` lists what is still missing.
 
