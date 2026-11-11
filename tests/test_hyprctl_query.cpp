@@ -325,8 +325,10 @@ TEST(HyprctlQuery, EachRequestRestartsTheDebounce) {
     rig.server.reply_with(std::string(kMpv));
     TimePoint last = Clock::now();
     for (int i = 0; i < 4; ++i) { // 0, 20, 40, 60 ms: the first one alone would fire at 100 ms
-        rig.request();
+        // Sampled before the request is posted: the loop thread may arm the 100 ms timer at once,
+        // and a test thread preempted after posting would sample too late.
         last = Clock::now();
+        rig.request();
         std::this_thread::sleep_for(20ms);
     }
     ASSERT_TRUE(rig.wait_for(1));

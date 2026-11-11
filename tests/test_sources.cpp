@@ -292,6 +292,37 @@ TEST(Hyprland, TheTailOfAnOversizedLineIsNotALine) {
         << "only the line after the oversized one is an event";
 }
 
+// T14-3: the source's own limit agrees with the parser's: a line of exactly 64 KiB (before its
+// newline), sent in pieces, is still an event.
+TEST(Hyprland, ALineOfExactly64KiBIsStillAnEvent) {
+    TempDir d;
+    const fs::path path = d.path() / ".socket2.sock";
+    auto listener = bind_socket(path);
+    ASSERT_TRUE(listener.has_value()) << listener.error().message();
+    EventLoop loop;
+    HyprEvents events;
+    HyprlandSource src(loop, [path] { return std::vector{path}; }, events.sink());
+    LoopThread running(loop);
+    UniqueFd conn = accept_within(listener->get(), 2000ms);
+    ASSERT_TRUE(conn);
+
+    const std::string prefix = "submap>>";
+    const std::string name(std::size_t{64} * 1024 - prefix.size(), 'n');
+    const std::string line = prefix + name;
+    std::string_view rest = line;
+    while (!rest.empty()) { // the whole line first, so the reader holds all of it unended
+        const ssize_t n = ::write(conn.get(), rest.data(), rest.size());
+        ASSERT_GT(n, 0);
+        rest.remove_prefix(static_cast<std::size_t>(n));
+    }
+    std::this_thread::sleep_for(200ms);
+    const std::string more = "\nsubmap>>resize\n";
+    ASSERT_EQ(::write(conn.get(), more.data(), more.size()), static_cast<ssize_t>(more.size()));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::Submap{name},
+                                                    hypr::Submap{"resize"}}));
+}
+
 TEST(Hyprland, Socket2CandidatesPutTheSignatureFirstThenTheNewest) {
     TempDir rt;
     const auto sock = [&rt](std::string_view sig) {
