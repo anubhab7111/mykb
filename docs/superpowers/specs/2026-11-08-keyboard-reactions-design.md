@@ -1,7 +1,9 @@
 # Keyboard reactions: design
 
 - **Date:** 2026-11-08. **Branch:** `keyboard-reactions` (from `main` at `2748e9e`).
-- **Status:** draft, waiting for the user's approval. The implementation plan follows once it is approved.
+- **Status:** implemented and merged (PR #4, 2026-11-11). The plan that was executed is
+  `docs/superpowers/plans/2026-11-08-keyboard-reactions.md`; what was decided while executing it,
+  and the review findings left open, are in `2026-11-08-keyboard-reactions-rulings.md` next to it.
 - **Builds on:** `docs/superpowers/specs/2026-10-21-omen-kbd-design.md` (the daemon, its layer
   stack, the hardware limits) and `docs/hardware-notes.md` (P4/P5 results).
 
@@ -33,8 +35,12 @@ link, so their lamp lights and flashes whatever is focused. For a linked session
 window in three ways:
 - it decides #8's skip;
 - it clears #7 on focus;
-- it lets the lamp **absorb an urgent signal from the same window**. If Claude rings the bell and
-  Alacritty marks itself urgent, that does not add a second light (#4) for the same event.
+- it keeps one light per window (§5.5): the lamp **absorbs an urgent signal from the same
+  window**, and a lamp raised for a window replaces the attention light (#4) that window already
+  has. If the terminal also rings its bell, it can mark itself urgent about 6 s before the hook
+  reports the prompt: the attention light then shows first and the agent lamp replaces it, so one
+  steady light remains for one event. If the hook comes first, the urgent signal is absorbed.
+  Claude Code did not ring the bell in the live check (2026-11-11), so a waiting episode cost 3 + 1.
 
 The decision recorded for this table (user, 2026-11-08): the two waiting lights (#4, #7) **blink and
 then hold**. They never pulse continuously. A continuous pulse would cost about 10 writes a second
@@ -184,10 +190,11 @@ The order has three consequences:
     (§8).
 - **Repo:** C++23, CMake + Ninja, GoogleTest, ASan + UBSan, `-Werror`, `.clang-format` (4 spaces),
   clang-tidy.
-  - The working tree has an **uncommitted reformat of `src/sources/hyprland.cpp`** by the user's
-    editor: 2-space indents and rewrapped comments, no logic change.
-  - This feature edits that file, so the user must agree to drop the reformat first, and it must
-    never be staged as it is (see the memory note on the editor).
+  - The user's editor can reformat C++ files to 2 spaces. Such a diff is never staged: stage by
+    path and only your own hunks.
+  - Resolved: the editor's reformat of `src/sources/hyprland.cpp` that this section once listed
+    as pending did not reach `main`; the file is committed with 4-space indents and passes
+    `clang-format --dry-run --Werror`.
 
 ## 5. Design
 
@@ -298,12 +305,16 @@ model the way submaps do today.
     a real `permission_prompt` did not make the terminal urgent, so a waiting episode cost 3 + 1 as
     designed. A bell does raise `urgent` (verified with a helper terminal), so a terminal or Claude
     Code setting that rings it would show this replacement.
-- API (pure):
-  - `raise(kind, key, now, std::optional<std::string> window)`, `clear(kind, key)`,
+- API (pure; `src/core/lamps.hpp`):
+  - `set_style(kind, LampStyle)`, which takes effect at once for the keys already raised
+  - `raise(kind, key, std::optional<std::string> window, now, bool play_intro)`, where the caller
+    sets `play_intro` while the keyboard is visible and the user is present; `clear(kind, key)`,
     `clear_window(window)`, `clear_kind(kind)`, `expire(now)`
   - `layer(now) -> LayerOps`
   - `next_change(now)` (intro boundaries and TTL expiry)
-  - `active() -> std::vector<LampKind>`
+  - `active() -> std::vector<LampKind>`, `empty()`, `key_count(kind)`
+- A kind holds at most 64 keys (`kMaxKeysPerKind`, Ruling P25): a new key past that evicts the
+  kind's oldest, so an unbounded producer cannot grow the per-frame work.
 
 ### 5.6 LookBook and Reactions
 
@@ -342,17 +353,23 @@ model the way submaps do today.
 - `Daemon::next_wake()` also considers `model_.reaction_deadline()`, **but only while the last
   output was not animated**. During an effect, the effect's ticks sample the clips, so reactions add
   no wake-ups and no writes. `on_wake()` recomputes when the reaction deadline is due.
-- `notify` and `agent` requests are answered as soon as the model has applied them. Unlike `set`,
-  they do not wait for the keyboard write, so hooks return fast.
+- `notify` and `agent` requests are answered at once, before any read or write (plan ruling R3): the
+  answer follows `deliver_signal`, which applies the signal or queues it behind a read. Unlike
+  `set`, they do not wait for the keyboard write, so hooks return fast.
 - **Read before start.** The Fn key changes the firmware backlight without any event. So before
   delivering a signal that could start a short clip or a lamp intro, the daemon checks its last
   backlight reading. If that reading is unknown or older than 5 s, the daemon asks the writer thread
   for a read and delivers the signal when the reading arrives.
   - If the read times out (the existing reply timeout), the signal is delivered as if the backlight
     were on, which is today's behavior.
-  - `notify` and `agent` requests reuse the existing wait-for-read path (`needs_backlight_read`,
-    `awaiting_probe_`), but only when the reading is stale. Hyprland signals get a small pending
-    list of their own.
+  - Every signal, whether from Hyprland, `notify` or `agent`, goes through one pending-signal list
+    in `Daemon::deliver_signal` (plan ruling R3). An earlier draft of this section said to reuse
+    `needs_backlight_read` and `awaiting_probe_`, but that path drops a request whose client has
+    gone, and a hook gives up after 1 s, so a lamp state would be lost. A signal that needs no read is applied at once,
+    unless one is already waiting: then it queues behind it, so a clear never overtakes the raise
+    it clears. One read serves the whole list, and a list that reaches 1024 signals is delivered as
+    if the read had timed out. `needs_backlight_read` remains for `status`, `subscribe` and
+    `toggle` only.
   - Lamp state (raise, clear) is never lost, only delayed by one read.
   - Reads happen only when reactions do, at most one every 5 s, and never periodically.
 
