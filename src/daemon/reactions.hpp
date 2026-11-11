@@ -50,8 +50,11 @@ class Reactions {
 
     /// Takes the signal `sig` at `now`. Ignored while disabled. Short reactions and lamp intros
     /// need `short_ok`, which is a visible keyboard and a present user; without it a lamp lights
-    /// steadily at once and a clip is not played. An empty window address counts as no window: an
-    /// `UrgentRaised` without one is dropped, and a `FocusChanged` to none clears no light.
+    /// steadily at once and a clip is not played. Like `update`, it first takes `visibility`, and
+    /// when that is not `short_ok` it also drops the playing and the queued clip, so any signal
+    /// that arrives while nobody would see the keyboard ends a clip still in flight. An empty
+    /// window address counts as no window: an `UrgentRaised` without one is dropped, and a
+    /// `FocusChanged` to none clears no light.
     void on_signal(const Signal &sig, TimePoint now, Visibility visibility);
 
     /// Moves time on and applies the visibility: expires lamps, advances the player and drops the

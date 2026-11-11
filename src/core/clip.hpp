@@ -66,9 +66,11 @@ bool empty(const LayerOps &ops);
 /// `below` with each zone's op applied; a zone without an op keeps its color.
 ///
 /// Always call it as `omenkbd::apply(...)`, inside namespace omenkbd too. Both arguments are
-/// std::array, so an unqualified call also finds std::apply through ADL. That template beats these
-/// const-reference parameters unless both arguments are const lvalues, and then fails to compile
-/// inside <tuple>.
+/// std::array, so an unqualified call also finds std::apply through ADL. That template is the
+/// better match whenever at least one argument is not a const lvalue (a mutable lvalue or an
+/// rvalue), and the call then fails to compile inside <tuple>. Only when both arguments are const
+/// lvalues does this function win, so an unqualified call can compile in one place and break in
+/// another.
 Frame apply(const Frame &below, const LayerOps &ops);
 
 /// The way a sweep runs across the zones: `Up` from left to right, `Down` from right to left.

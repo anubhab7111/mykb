@@ -52,8 +52,9 @@ class LampSet {
 
     /// Lights `kind` for `key`, linked to `window` when given. A kind that had no keys starts an
     /// intro at `now` when `play_intro` is set; a kind already lit never does. Raising a key the
-    /// kind already holds only refreshes its TTL. Ignored when the kind has no zones: it changes
-    /// nothing.
+    /// kind already holds refreshes its TTL, after the window rules below have run for it (a held
+    /// `Agent` key raised again still drops the `Urgent` keys of its window). Ignored when the kind
+    /// has no zones: it changes nothing.
     ///
     /// A kind holds at most `kMaxKeysPerKind` keys: a new key raised past that evicts the kind's
     /// oldest one first (the smallest `raised_at`; on a tie the smallest key), with its window
@@ -86,11 +87,14 @@ class LampSet {
     /// What the lamps do at `now`: `Urgent` paints first, `Agent` over it. A kind in its intro
     /// shows the phase at `now`; once the intro is over, or when it never played, it paints its
     /// zones steadily. A late sample therefore shows the steady paint and never replays a blink.
+    /// Call `expire(now)` first, as `Reactions` does: a key past its TTL shows until then.
     [[nodiscard]] LayerOps layer(TimePoint now) const;
 
     /// When `layer` or `expire` next have something to do: the next intro boundary where the paint
     /// changes, or the earliest TTL expiry. `nullopt` when nothing will change. A time that is not
-    /// after `now` means `expire(now)` is overdue.
+    /// after `now` means `expire(now)` is overdue. A caller that caches the answer must have run
+    /// `expire(now)` first, as `Reactions` does: a key past its TTL still counts, so its expiry
+    /// would come back as the same past time.
     [[nodiscard]] std::optional<TimePoint> next_change(TimePoint now) const;
 
     /// The kinds that hold a key, `Agent` first.
