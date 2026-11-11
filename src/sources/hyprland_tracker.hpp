@@ -57,8 +57,12 @@ class HyprlandTracker {
     /// The focused window's address; empty means no window is focused, nullopt that no focus event
     /// has arrived since the (re)connect (P20).
     std::optional<std::string> focused_;
-    /// The class from the latest `activewindow` line; the `activewindowv2` that follows uses it.
-    std::string app_class_;
+    /// The class from the latest `activewindow` line, until the `activewindowv2` that follows
+    /// uses it up (whether or not the focus changed): a lost line then means no class, never the
+    /// class of the window before (T14-1).
+    std::string pending_class_;
+    /// The focused window's own class, as its `FocusChanged` carried it; for `replay`.
+    std::string focused_class_;
     std::unordered_set<std::string> urgent_;
 };
 

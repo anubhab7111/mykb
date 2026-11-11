@@ -232,6 +232,32 @@ TEST(HyprlandTracker, FocusChangedCarriesTheClassFromThePrecedingActiveWindowLin
     EXPECT_EQ(t.on(hypr::ActiveWindowV2{""}), (Out{sig(signal::FocusChanged{"", ""}), check()}));
 }
 
+// T14-1: the class from an `activewindow` line belongs to the `activewindowv2` that follows it,
+// once. If a line is lost (a title over 64 KiB is dropped whole), the next focus carries no class
+// rather than the previous window's, and `replay` still knows the focused window's own class.
+TEST(HyprlandTracker, AClassIsUsedByOneFocusChangeOnly) {
+    using Signals = std::vector<Signal>;
+    HyprlandTracker t;
+    (void)t.on(hypr::ActiveWindow{"firefox"});
+    EXPECT_EQ(t.on(hypr::ActiveWindowV2{"a1"}),
+              (Out{sig(signal::FocusChanged{"a1", "firefox"}), check()}));
+    EXPECT_EQ(t.replay(), (Signals{signal::FocusChanged{"a1", "firefox"}}));
+
+    EXPECT_EQ(t.on(hypr::ActiveWindowV2{"b2"}), (Out{sig(signal::FocusChanged{"b2", ""}), check()}))
+        << "no activewindow line came for b2: its class is unknown, not firefox";
+    EXPECT_EQ(t.replay(), (Signals{signal::FocusChanged{"b2", ""}}));
+
+    // A repeat for the focused window (a title change) uses up its class line too.
+    (void)t.on(hypr::ActiveWindow{"kitty"});
+    (void)t.on(hypr::ActiveWindowV2{"c3"});
+    (void)t.on(hypr::ActiveWindow{"kitty"});
+    EXPECT_EQ(t.on(hypr::ActiveWindowV2{"c3"}), Out{}) << "P15";
+    EXPECT_EQ(t.replay(), (Signals{signal::FocusChanged{"c3", "kitty"}}))
+        << "the focused window keeps its class";
+    EXPECT_EQ(t.on(hypr::ActiveWindowV2{"d4"}), (Out{sig(signal::FocusChanged{"d4", ""}), check()}))
+        << "the repeat's class line is not left over for the next window";
+}
+
 TEST(HyprlandTracker, FocusWorkspaceFullscreenAndCloseRequestAFullscreenCheck) {
     HyprlandTracker t;
     const auto has_check = [&t](const HyprEvent &e) {
