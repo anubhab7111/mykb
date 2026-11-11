@@ -81,9 +81,13 @@ void LampSet::raise(LampKind kind, std::string key, std::optional<std::string> w
     }
     if (window) {
         if (kind == LampKind::Urgent) {
-            const auto &agent_keys = slot(LampKind::Agent).keys;
-            const bool absorbed = std::ranges::any_of(
-                agent_keys, [&window](const auto &entry) { return linked_to(entry, *window); });
+            // An agent kind with no zones keeps its keys but cannot show a light, so it has nothing
+            // to absorb the attention light for.
+            const Slot &agent = slot(LampKind::Agent);
+            const bool absorbed = !agent.style.zones.empty() &&
+                                  std::ranges::any_of(agent.keys, [&window](const auto &entry) {
+                                      return linked_to(entry, *window);
+                                  });
             if (absorbed) {
                 return;
             }
