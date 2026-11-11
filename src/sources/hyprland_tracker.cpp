@@ -21,7 +21,7 @@ std::vector<TrackerOut> HyprlandTracker::on(const HyprEvent &ev) {
 std::vector<Signal> HyprlandTracker::replay() const {
     std::vector<Signal> out;
     if (focused_) {
-        out.emplace_back(signal::FocusChanged{*focused_, app_class_});
+        out.emplace_back(signal::FocusChanged{*focused_, focused_class_});
     }
     std::vector<std::string> urgent(urgent_.begin(), urgent_.end()); // sorted next: a stable order
     std::ranges::sort(urgent);
@@ -34,7 +34,8 @@ std::vector<Signal> HyprlandTracker::replay() const {
 void HyprlandTracker::reset() {
     workspace_.reset();
     focused_.reset();
-    app_class_.clear();
+    pending_class_.clear();
+    focused_class_.clear();
     urgent_.clear();
 }
 
@@ -84,18 +85,20 @@ HyprlandTracker::Out HyprlandTracker::handle(const hypr::Urgent &ev) {
 }
 
 HyprlandTracker::Out HyprlandTracker::handle(const hypr::ActiveWindow &ev) {
-    app_class_ = ev.app_class;
+    pending_class_ = ev.app_class;
     return {};
 }
 
 HyprlandTracker::Out HyprlandTracker::handle(const hypr::ActiveWindowV2 &ev) {
     Out out;
+    std::string app_class = std::exchange(pending_class_, {}); // its line is used up either way
     if (focused_ == ev.address) {
         return out; // a title change of the focused window re-sends both focus events (P15)
     }
     focused_ = ev.address;
+    focused_class_ = std::move(app_class);
     urgent_.erase(ev.address);
-    out.push_back(sig(signal::FocusChanged{ev.address, app_class_}));
+    out.push_back(sig(signal::FocusChanged{ev.address, focused_class_}));
     out.push_back(check());
     return out;
 }
