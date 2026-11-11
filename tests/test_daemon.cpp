@@ -929,7 +929,9 @@ TEST_F(DaemonTest, AReadThatFindsTheLightBackOnShowsTheWaitingReactionInItsFirst
 // so a read that predates the daemon's own backlight write is not asked for again.
 TEST_F(DaemonTest, AReloadThatTurnsReactionsOffDropsTheSignalsWaitingForARead) {
     start(kRigConfig);
-    h().set_delay(500ms);
+    // The slow write is long enough that the reload below reaches the daemon while the writer is
+    // still inside it, even on a loaded machine (review of the minors, Minor 5).
+    h().set_delay(1500ms);
     daemon_->post(FactUpdate{fact::FullscreenApp{"mpv"}}); // a slow zone write
     std::this_thread::sleep_for(100ms);                    // the writer is inside it
     h().set_delay(0ms);
