@@ -31,6 +31,7 @@ color = "theme:blue"
 critical = "theme:red"
 min_urgency = "normal"   # "low" | "normal" | "critical"
 skip_if_focused = true
+# quote keys that contain dots: "com.example.app" = "theme:blue"
 [reactions.notify.apps]  # matched case-insensitively; this table replaces the built-in apps
 zapzap = "theme:green"
 discord = "#5865f2"
