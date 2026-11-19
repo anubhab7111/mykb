@@ -79,7 +79,7 @@ kill %2 %1
 | `profile <name\|next\|prev\|custom>` | Switch profile. |
 | `brightness <0-100\|+N\|-N>` | Brightness. `0` turns the backlight off; colors are kept. |
 | `on`, `off`, `toggle` | Firmware backlight. Colors are kept. |
-| `effect <static\|breathe\|wave\|cycle\|gradient> [--speed 1-100]` | Run an effect. Needs `[effects] enabled = true`. |
+| `effect <static\|breathe\|wave\|cycle\|gradient\|drift\|glow\|tide\|dusk> [--speed 1-100]` | Run an effect. Needs `[effects] enabled = true`. |
 | `hint <mods\|clear>` | Show a mode color. Used by the Hyprland hook. |
 | `idle on\|off` | Idle gate. Used by hypridle. |
 | `flag <gamemode\|locked> on\|off` | Flags for rules and the lock gate. |
@@ -102,6 +102,26 @@ Exit codes: `0` ok; `1` the daemon or the keyboard write reported an error (mess
 - `~/.local/state/omen-kbd/state.json`: current profile, custom colors, brightness, on/off and the
   lifetime write counter. Written atomically, at most once a second.
 - `$XDG_RUNTIME_DIR/omen-kbd.sock`: the daemon's socket (mode 0600, JSON lines).
+
+## Slow Catppuccin glows
+
+Four slow ambient effects, for a profile's `effect` or `omen-kbd effect`. They take their stops from
+the profile's four colors, so with `theme:` colors they follow Mocha/Latte when the theme changes.
+The example config ships a profile for each (`drift`, `lavender-glow`, `tide`, `dusk`).
+
+| Effect | Look | Colors used | Loop at speed 50 |
+|---|---|---|---|
+| `drift` | The colors flow left to right in a loop; WASD follows the left zone. | all four, as a loop | 32 s |
+| `glow` | The keyboard breathes between two colors and dims at the low point. | first two | 14 s |
+| `tide` | A wave rolls back and forth over three colors; WASD holds the fourth. | first three, WASD fourth | 20 s |
+| `dusk` | A cross-fade through the four colors and back. | all four, in order | 36 s |
+
+`speed` (1 to 100, default 50) shortens or stretches the loop up to 4 times either way. The frame
+changes **twice a second** whatever `[effects] fps` is, so a glow costs at most 7200 of the 40000
+hourly writes (`kSlowUpdatesPerSecond` in `src/core/effects.cpp`). Reactions, the Claude lamp and
+key hints draw on top as with any effect, and the battery pause and lock and idle gates apply.
+To add them to your own config, paste `packaging/snippets/catppuccin-glows.toml` into
+`~/.config/omen-kbd/config.toml`, run `omen-kbd reload`, then `omen-kbd profile drift`.
 
 ## Reactions
 
