@@ -17,7 +17,6 @@ Inputs inputs() {
                   .speed = 50,
                   .animate = false,
                   .overlay = std::nullopt,
-                  .hint = std::nullopt,
                   .brightness = 100,
                   .backlight = true};
 }
@@ -49,7 +48,7 @@ TEST(Compositor, EffectIgnoredWhenNotAnimating) {
 
 TEST(Compositor, TintHalfBlends) {
     Inputs i = inputs();
-    i.overlay = ResolvedTint{kBlack, 0.5};
+    i.overlay = TintOverlay{kBlack, 0.5};
     const Frame z = compose(i, 0.0).zones;
     EXPECT_EQ(z[0], (Rgb{128, 0, 0}));
     EXPECT_EQ(z[3], (Rgb{128, 128, 128}));
@@ -57,18 +56,8 @@ TEST(Compositor, TintHalfBlends) {
 
 TEST(Compositor, ZoneOverlayReplacesOnlyNamedZones) {
     Inputs i = inputs();
-    i.overlay = ResolvedZones{{Zone::Right}, Rgb{10, 20, 30}, false};
+    i.overlay = ZonesOverlay{{Zone::Right}, Rgb{10, 20, 30}, false};
     EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, G, Rgb{10, 20, 30}, W}));
-}
-
-TEST(Compositor, HintBeatsEffectAndOverlay) {
-    Inputs i = inputs();
-    i.effect = Effect::Drift;
-    i.animate = true;
-    i.overlay = ResolvedTint{kBlack, 0.5};
-    i.hint = Rgb{0x89, 0x26, 0xff};
-    const Rgb h{0x89, 0x26, 0xff};
-    EXPECT_EQ(compose(i, 1.3).zones, (Frame{h, h, h, h}));
 }
 
 TEST(Compositor, BrightnessScalesAndZeroTurnsBacklightOff) {
@@ -95,17 +84,9 @@ TEST(Compositor, BacklightInputFalseMeansOffAndNotAnimated) {
     EXPECT_FALSE(out.animated);
 }
 
-TEST(Compositor, AnimatedFalseWithHint) {
-    Inputs i = inputs();
-    i.effect = Effect::Tide;
-    i.animate = true;
-    i.hint = G;
-    EXPECT_FALSE(compose(i, 0.0).animated);
-}
-
 TEST(Compositor, PulseOverlayAnimatesOnlyWhenAllowed) {
     Inputs i = inputs();
-    i.overlay = ResolvedZones{{Zone::Right}, R, true};
+    i.overlay = ZonesOverlay{{Zone::Right}, R, true};
     Output out = compose(i, 0.5);
     EXPECT_EQ(out.zones[2], R);
     EXPECT_FALSE(out.animated);
@@ -115,41 +96,29 @@ TEST(Compositor, PulseOverlayAnimatesOnlyWhenAllowed) {
     EXPECT_TRUE(out.animated) << "a pulsing overlay keeps the frame animated";
 }
 
-TEST(Compositor, LampsDrawAboveTheProfileAndBelowTheHint) {
+TEST(Compositor, LampsDrawAboveTheProfileAndTheOverlay) {
     constexpr Rgb lamp{255, 128, 0};
     Inputs i = inputs();
     i.lamps = layer(Zone::Wasd, Paint{lamp});
     EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, G, B, lamp})) << "the lamp shows over the profile";
 
-    i.overlay = ResolvedTint{kBlack, 0.5};
+    i.overlay = TintOverlay{kBlack, 0.5};
     const Frame tinted = compose(i, 0.0).zones;
     EXPECT_EQ(tinted[0], (Rgb{128, 0, 0})) << "the overlay still tints the zones without a lamp";
     EXPECT_EQ(tinted[3], lamp) << "the lamp is drawn after the overlay";
-
-    constexpr Rgb h{0x89, 0x26, 0xff};
-    i.hint = h;
-    EXPECT_EQ(compose(i, 0.0).zones, (Frame{h, h, h, h})) << "the hint fills every zone, lamp too";
 }
 
-TEST(Compositor, TransientDrawsAboveTheHint) {
-    constexpr Rgb h{100, 50, 200};
+TEST(Compositor, TransientDrawsAboveTheLamps) {
     constexpr Rgb lamp{255, 128, 0};
     constexpr Rgb flash{0, 255, 255};
     Inputs i = inputs();
-    i.hint = h;
     i.lamps = layer(Zone::Right, Paint{lamp});
-    i.transient = layer(Zone::Left, Paint{flash});
-    EXPECT_EQ(compose(i, 0.0).zones, (Frame{flash, h, h, h}))
-        << "the clip shows over the hint; the lamp stays hidden under it";
+    i.transient = layer(Zone::Right, Paint{flash});
+    EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, G, flash, W}));
 
     i.transient = layer(Zone::Middle, Scale{0.5});
-    EXPECT_EQ(compose(i, 0.0).zones, (Frame{h, Rgb{50, 25, 100}, h, h}))
-        << "the clip's op works on the hint-filled frame, not on the profile";
-
-    i.hint = std::nullopt;
-    i.transient = layer(Zone::Right, Paint{flash});
-    EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, G, flash, W}))
-        << "the clip also covers a lamp when there is no hint";
+    EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, Rgb{0, 128, 0}, lamp, W}))
+        << "the clip's op works on the frame below it";
 }
 
 TEST(Compositor, BrightnessScalesLampsAndTransient) {
@@ -196,16 +165,12 @@ TEST(Compositor, ABacklightInputOfFalseStillComposesTheLayersButGatesTheOutput) 
 }
 
 TEST(Compositor, MixInTheTransientLayerBlendsTheFrameBelowIt) {
-    constexpr Rgb h{100, 50, 200};
     Inputs i = inputs();
     i.transient = layer(Zone::Middle, Mix{kWhite, 0.5});
     EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, Rgb::lerp(G, kWhite, 0.5), B, W}))
         << "the other zones show what is below";
 
-    // On top of the hint and of a lamp: it blends whatever the frame holds at that point.
-    i.hint = h;
-    EXPECT_EQ(compose(i, 0.0).zones, (Frame{h, Rgb::lerp(h, kWhite, 0.5), h, h}));
-    i.hint = std::nullopt;
+    // On top of a lamp: it blends whatever the frame holds at that point.
     i.lamps = layer(Zone::Middle, Paint{Rgb{200, 0, 0}});
     EXPECT_EQ(compose(i, 0.0).zones, (Frame{R, Rgb::lerp(Rgb{200, 0, 0}, kWhite, 0.5), B, W}));
 
@@ -216,7 +181,7 @@ TEST(Compositor, MixInTheTransientLayerBlendsTheFrameBelowIt) {
 
 TEST(Compositor, ScaleAndMixInTheLampsLayerWorkOnTheOverlaidProfile) {
     Inputs i = inputs();
-    i.overlay = ResolvedTint{kBlack, 0.5};
+    i.overlay = TintOverlay{kBlack, 0.5};
     const Rgb tinted_blue = Rgb::lerp(B, kBlack, 0.5);
     const Rgb tinted_red = Rgb::lerp(R, kBlack, 0.5);
 
@@ -231,11 +196,6 @@ TEST(Compositor, ScaleAndMixInTheLampsLayerWorkOnTheOverlaidProfile) {
     z = compose(i, 0.0).zones;
     EXPECT_EQ(z[0], Rgb::lerp(tinted_red, kWhite, 0.25));
     EXPECT_EQ(z[2], tinted_blue);
-
-    // The hint still replaces the lamp layer, whatever its op.
-    constexpr Rgb h{100, 50, 200};
-    i.hint = h;
-    EXPECT_EQ(compose(i, 0.0).zones, (Frame{h, h, h, h}));
 }
 
 TEST(Compositor, ReactionsNeverMakeTheFrameAnimated) {
@@ -258,7 +218,7 @@ TEST(Compositor, EmptyLayersChangeNothing) {
     i.effect = Effect::Drift;
     i.speed = 50;
     i.animate = true;
-    i.overlay = ResolvedTint{kBlack, 0.5};
+    i.overlay = TintOverlay{kBlack, 0.5};
     i.brightness = 70;
     i.lamps = LayerOps{};
     i.transient = LayerOps{};
@@ -272,8 +232,4 @@ TEST(Compositor, EmptyLayersChangeNothing) {
     const Output out = compose(i, 1.3);
     EXPECT_EQ(out.zones, expected);
     EXPECT_TRUE(out.animated) << "an animated effect keeps the frame animated";
-
-    constexpr Rgb h{0x89, 0x26, 0xff};
-    i.hint = h;
-    EXPECT_EQ(compose(i, 1.3).zones, (Frame{h.scale(70), h.scale(70), h.scale(70), h.scale(70)}));
 }

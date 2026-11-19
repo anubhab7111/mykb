@@ -1,6 +1,5 @@
 #include "core/lookbook.hpp"
 
-#include "core/palette.hpp"
 #include "reactions_config.hpp"
 
 #include <chrono>
@@ -20,16 +19,6 @@ using namespace std::chrono_literals;
 
 namespace {
 
-/// Every theme name the defaults use, each a different color so precedence shows in the result.
-constexpr std::string_view kThemeCss = R"(
-@define-color lavender #b4befe;
-@define-color blue #89b4fa;
-@define-color red #f38ba8;
-@define-color green #a6e3a1;
-@define-color yellow #f9e2af;
-@define-color peach #fab387;
-)";
-
 constexpr Rgb kLavender{0xb4, 0xbe, 0xfe};
 constexpr Rgb kBlue{0x89, 0xb4, 0xfa};
 constexpr Rgb kRed{0xf3, 0x8b, 0xa8};
@@ -38,15 +27,25 @@ constexpr Rgb kYellow{0xf9, 0xe2, 0xaf};
 constexpr Rgb kPeach{0xfa, 0xb3, 0x87};
 constexpr Rgb kDiscord{0x58, 0x65, 0xf2};
 
-Resolver palette_resolver() {
-    const Palette palette = Palette::from_waybar_css(kThemeCss);
-    return [palette](const ColorRef &c) { return c.resolve(palette, ThemeColors::Exact).value(); };
+LookBook look_of(const ReactionsCfg &cfg) { return LookBook(cfg); }
+
+/// A config with every color set (none is built in), each a different color so precedence shows in
+/// the result.
+ReactionsCfg spec_defaults() {
+    ReactionsCfg c = default_reactions();
+    c.workspace.color = kLavender;
+    c.notify.color = kBlue;
+    c.notify.critical = kRed;
+    c.notify.apps.emplace("zapzap", kGreen);
+    c.notify.apps.emplace("discord", kDiscord);
+    c.urgent.color = kYellow;
+    c.agent.waiting = kPeach;
+    c.agent.done = kGreen;
+    return c;
 }
 
-LookBook look_of(const ReactionsCfg &cfg) { return LookBook(cfg, palette_resolver()); }
-
 /// The spec's defaults.
-LookBook default_look() { return look_of(default_reactions()); }
+LookBook default_look() { return look_of(spec_defaults()); }
 
 /// A layer that paints `color` on `zones` and leaves the others alone.
 LayerOps lit(Rgb color, std::initializer_list<Zone> zones) {
@@ -114,9 +113,9 @@ TEST(LookBook, WorkspaceSweepDirectionAndStep) {
 }
 
 TEST(LookBook, WorkspaceSweepFollowsTheConfiguredColorWasdAndStep) {
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.step_ms = 200;
-    cfg.workspace.color = ColorRef::theme("peach");
+    cfg.workspace.color = kPeach;
     cfg.workspace.wasd_with = WasdWith::Middle;
     const LookBook look = look_of(cfg);
 
@@ -141,7 +140,7 @@ TEST(LookBook, WindowPulsesUseTheConfiguredAmountsAndCanBeSwitchedOff) {
     EXPECT_EQ(close.steps[0].ops, everywhere(Scale{0.35}));
     EXPECT_EQ(close.steps[0].hold, 120ms);
 
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.step_ms = 90;
     cfg.window.open = 0.2;
     cfg.window.close = 0.6;
@@ -183,8 +182,8 @@ TEST(LookBook, NotificationColorPrecedence) {
     EXPECT_EQ(flash_color(look.notified(note("", "com.rtosta.ZapZap"), "")), kGreen);
 
     // ... and the whole desktop entry.
-    ReactionsCfg cfg = default_reactions();
-    cfg.notify.apps.emplace("org.example.tool", ColorRef::theme("peach"));
+    ReactionsCfg cfg = spec_defaults();
+    cfg.notify.apps.emplace("org.example.tool", kPeach);
     const LookBook with_entry = look_of(cfg);
     EXPECT_EQ(flash_color(with_entry.notified(note("", "Org.Example.Tool"), "")), kPeach);
 
@@ -195,11 +194,11 @@ TEST(LookBook, NotificationColorPrecedence) {
     // ... then the whole entry before its last segment, and the app name before the last segment.
     // The table holds an app (chat), the entry (org.example.tool) and the last segment (tool),
     // each with a color of its own; taking the winner out hands the win to the next one.
-    ReactionsCfg order = default_reactions();
+    ReactionsCfg order = spec_defaults();
     order.notify.apps.clear();
-    order.notify.apps.emplace("chat", ColorRef::theme("peach"));
-    order.notify.apps.emplace("org.example.tool", ColorRef::theme("red"));
-    order.notify.apps.emplace("tool", ColorRef::theme("yellow"));
+    order.notify.apps.emplace("chat", kPeach);
+    order.notify.apps.emplace("org.example.tool", kRed);
+    order.notify.apps.emplace("tool", kYellow);
     const LookBook with_all = look_of(order);
     EXPECT_EQ(flash_color(with_all.notified(note("Chat", "org.example.tool"), "")), kPeach);
     EXPECT_EQ(flash_color(with_all.notified(note("Other", "org.example.tool"), "")), kRed);
@@ -211,7 +210,7 @@ TEST(LookBook, NotificationColorPrecedence) {
     order.notify.apps.erase("org.example.tool");
     const LookBook only_last = look_of(order);
     EXPECT_EQ(flash_color(only_last.notified(note("Chat", "org.example.tool"), "")), kYellow);
-    order.notify.apps.emplace("chat", ColorRef::theme("peach"));
+    order.notify.apps.emplace("chat", kPeach);
     const LookBook app_and_last = look_of(order);
     EXPECT_EQ(flash_color(app_and_last.notified(note("Chat", "org.example.tool"), "")), kPeach);
 
@@ -222,7 +221,7 @@ TEST(LookBook, NotificationColorPrecedence) {
     EXPECT_EQ(flash_color(look.notified(note("Firefox", "", Urgency::Critical), "")), kRed);
 
     // A configured default replaces the spec's.
-    cfg.notify.color = ColorRef::hex(Rgb{1, 2, 3});
+    cfg.notify.color = Rgb{1, 2, 3};
     const LookBook other = look_of(cfg);
     EXPECT_EQ(flash_color(other.notified(note("Firefox", ""), "")), (Rgb{1, 2, 3}));
 }
@@ -230,10 +229,10 @@ TEST(LookBook, NotificationColorPrecedence) {
 TEST(LookBook, AppKeysAreLowercasedByTheLookBookItself) {
     // A table built by hand, not by the parser: the key keeps its case. The default table is
     // cleared so no lowercase default key answers for it.
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.notify.apps.clear();
-    cfg.notify.apps.emplace("ZapZap", ColorRef::theme("peach"));
-    cfg.notify.apps.emplace("Org.Example.Tool", ColorRef::theme("red"));
+    cfg.notify.apps.emplace("ZapZap", kPeach);
+    cfg.notify.apps.emplace("Org.Example.Tool", kRed);
     const LookBook look = look_of(cfg);
 
     EXPECT_EQ(flash_color(look.notified(note("zapzap", ""), "")), kPeach);
@@ -249,10 +248,10 @@ TEST(LookBook, AppKeysAreLowercasedByTheLookBookItself) {
 TEST(LookBook, TwoAppKeysThatCollideWhenLowercasedKeepTheFirstSilently) {
     // The parser rejects such a table, so only a hand-built one reaches the look book. `apps` is
     // ordered and "ZapZap" sorts before "zapzap", so that entry is the first and its color stays.
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.notify.apps.clear();
-    cfg.notify.apps.emplace("zapzap", ColorRef::theme("red"));
-    cfg.notify.apps.emplace("ZapZap", ColorRef::theme("peach"));
+    cfg.notify.apps.emplace("zapzap", kRed);
+    cfg.notify.apps.emplace("ZapZap", kPeach);
     const LookBook look = look_of(cfg);
 
     EXPECT_EQ(flash_color(look.notified(note("zapzap", ""), "")), kPeach);
@@ -265,7 +264,7 @@ TEST(LookBook, LowUrgencyIsSkippedByDefault) {
     EXPECT_TRUE(look.notified(note("Firefox", "", Urgency::Normal), "").has_value());
     EXPECT_TRUE(look.notified(note("Firefox", "", Urgency::Critical), "").has_value());
 
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.notify.min_urgency = Urgency::Low;
     const LookBook everything = look_of(cfg);
     EXPECT_TRUE(everything.notified(note("Firefox", "", Urgency::Low), "").has_value());
@@ -277,7 +276,7 @@ TEST(LookBook, LowUrgencyIsSkippedByDefault) {
 }
 
 TEST(LookBook, SkipsTheFocusedAppUnlessTurnedOff) {
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     const LookBook look = look_of(cfg);
     const signal::Notified zap = note("ZapZap", "com.rtosta.zapzap");
 
@@ -301,8 +300,8 @@ TEST(LookBook, SkipsTheFocusedAppUnlessTurnedOff) {
 }
 
 TEST(LookBook, EmptyIdentitiesNeverMatch) {
-    ReactionsCfg cfg = default_reactions();
-    cfg.notify.apps.emplace("", ColorRef::theme("peach")); // a hostile table
+    ReactionsCfg cfg = spec_defaults();
+    cfg.notify.apps.emplace("", kPeach); // a hostile table
     const LookBook look = look_of(cfg);
 
     // `omen-kbd notify` with no --app and no --desktop-entry, before the first focus event: the
@@ -325,7 +324,7 @@ TEST(LookBook, EmptyIdentitiesNeverMatch) {
 }
 
 TEST(LookBook, NotifyFlashIsOneBlinkOnAllZones) {
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.blink_ms = 200;
     cfg.step_ms = 90; // the flash follows blink_ms, not step_ms
     const LookBook look = look_of(cfg);
@@ -345,11 +344,11 @@ TEST(LookBook, AgentDoneUsesAgentZonesAndTheDoneColor) {
     EXPECT_EQ(done.steps[0].hold, 150ms);
 
     // The configured zones, the done color (not the waiting one) and blink_ms.
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.blink_ms = 250;
     cfg.agent.zones = {Zone::Left, Zone::Right};
-    cfg.agent.waiting = ColorRef::theme("peach");
-    cfg.agent.done = ColorRef::theme("yellow");
+    cfg.agent.waiting = kPeach;
+    cfg.agent.done = kYellow;
     const LookBook tuned = look_of(cfg);
     const Clip custom = got(tuned.agent_done());
     ASSERT_EQ(custom.steps.size(), 1u);
@@ -379,13 +378,13 @@ TEST(LookBook, StylesCarryZonesColorBlinksAndTtl) {
     EXPECT_EQ(agent.blink, 150ms);
     EXPECT_EQ(agent.ttl, 3600s);
 
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.blink_ms = 300;
     cfg.urgent.zones = {Zone::Left, Zone::Middle};
-    cfg.urgent.color = ColorRef::theme("red");
+    cfg.urgent.color = kRed;
     cfg.urgent.blinks = 0; // passed through: LampSet treats 0 and 1 alike
     cfg.agent.zones = {};  // passed through: an empty list disables the lamp
-    cfg.agent.waiting = ColorRef::theme("green");
+    cfg.agent.waiting = kGreen;
     cfg.agent.blinks = 5;
     cfg.agent.ttl_s = 60;
     const LookBook tuned = look_of(cfg);
@@ -411,7 +410,7 @@ TEST(LookBook, LimitsCarryTheRateTheWindowCooldownAndTheGap) {
     EXPECT_EQ(defaults.window_cooldown, 500ms);
     EXPECT_EQ(defaults.gap, 150ms);
 
-    ReactionsCfg cfg = default_reactions();
+    ReactionsCfg cfg = spec_defaults();
     cfg.max_per_minute = 7;
     cfg.window.cooldown_ms = 1200;
     cfg.blink_ms = 320;
@@ -422,46 +421,19 @@ TEST(LookBook, LimitsCarryTheRateTheWindowCooldownAndTheGap) {
     EXPECT_EQ(tuned.gap, 320ms);
 }
 
-TEST(LookBook, EveryColorIsResolvedOnceAtConstruction) {
-    // One distinct color per setting, so a skipped or repeated resolve shows in the counts.
+TEST(LookBook, AReactionWithoutAColorIsOff) {
+    const LookBook bare = look_of(default_reactions()); // no color is built in
+    EXPECT_FALSE(bare.workspace(1, 2).has_value());
+    EXPECT_FALSE(bare.notified(note("any", ""), "").has_value());
+    EXPECT_FALSE(bare.notified(note("any", "", Urgency::Critical), "").has_value());
+    EXPECT_FALSE(bare.agent_done().has_value());
+    EXPECT_TRUE(bare.urgent_style().zones.empty()) << "an off lamp has no zones";
+    EXPECT_TRUE(bare.agent_style().zones.empty());
+    EXPECT_TRUE(bare.window_opened().has_value()) << "the window pulses need no color";
+    EXPECT_TRUE(bare.window_closed().has_value());
+
+    // A critical notification with no `critical` color falls back to the others.
     ReactionsCfg cfg = default_reactions();
-    cfg.workspace.color = ColorRef::hex(Rgb{1, 0, 0});
-    cfg.notify.color = ColorRef::hex(Rgb{2, 0, 0});
-    cfg.notify.critical = ColorRef::hex(Rgb{3, 0, 0});
-    cfg.notify.apps.clear();
-    cfg.notify.apps.emplace("one", ColorRef::hex(Rgb{4, 0, 0}));
-    cfg.notify.apps.emplace("two", ColorRef::hex(Rgb{5, 0, 0}));
-    cfg.urgent.color = ColorRef::hex(Rgb{6, 0, 0});
-    cfg.agent.waiting = ColorRef::hex(Rgb{7, 0, 0});
-    cfg.agent.done = ColorRef::hex(Rgb{8, 0, 0});
-
-    std::map<std::string, int> asked;
-    int calls = 0;
-    const Resolver counting = [&](const ColorRef &c) {
-        ++calls;
-        ++asked[c.to_string()];
-        return Rgb{9, 9, 9};
-    };
-    const LookBook look(cfg, counting);
-
-    // Six single settings and two apps.
-    EXPECT_EQ(calls, 8);
-    EXPECT_EQ(asked.size(), 8u);
-    for (const auto &[color, count] : asked) {
-        EXPECT_EQ(count, 1) << color;
-    }
-
-    // Using the look resolves nothing more.
-    EXPECT_TRUE(look.workspace(1, 2).has_value());
-    EXPECT_TRUE(look.workspace(2, 1).has_value());
-    EXPECT_TRUE(look.window_opened().has_value());
-    EXPECT_TRUE(look.window_closed().has_value());
-    EXPECT_TRUE(look.notified(note("one", ""), "").has_value());
-    EXPECT_TRUE(look.notified(note("other", "", Urgency::Critical), "").has_value());
-    EXPECT_TRUE(look.notified(note("other", ""), "").has_value());
-    EXPECT_TRUE(look.agent_done().has_value());
-    EXPECT_EQ(look.urgent_style().color, (Rgb{9, 9, 9}));
-    EXPECT_EQ(look.agent_style().color, (Rgb{9, 9, 9}));
-    EXPECT_EQ(look.limits().max_per_minute, 30u);
-    EXPECT_EQ(calls, 8);
+    cfg.notify.color = kBlue;
+    EXPECT_EQ(flash_color(look_of(cfg).notified(note("any", "", Urgency::Critical), "")), kBlue);
 }

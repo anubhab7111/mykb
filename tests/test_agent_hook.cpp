@@ -614,9 +614,9 @@ TEST_F(AgentHook, ReactionsSnippetCarriesTheExampleDefaultsAndTheFullscreenRule)
     const std::string example = read_file(source_path("packaging/config.example.toml"));
     EXPECT_TRUE(snippet.starts_with("# omen-kbd: "));
     EXPECT_NE(snippet.find("power saver dims"), std::string::npos) << "say where it goes";
-    // The [reactions] tables, word for word, up to the first [[profiles]].
+    // The [reactions] tables, word for word, up to the profiles' comment.
     const auto begin = example.find("[reactions]\n");
-    const auto end = example.find("[[profiles]]");
+    const auto end = example.find("# Profiles are named looks");
     ASSERT_NE(begin, std::string::npos);
     ASSERT_NE(end, std::string::npos);
     const std::string block = example.substr(begin, end - begin);
@@ -643,29 +643,11 @@ zone_map = { left = 2, middle = 1, right = 0, wasd = 3 }
 enabled = false
 fps = 10
 
-[theme]
-colors = "vivid"
-dir = "~/.config/theming/current"
-
 [gates]
 on_lock = "off"
 on_idle = "dim"
 dim_brightness = 20
 pause_effects_on_battery = true
-
-[hints]
-timeout_s = 15
-delay_ms = 250
-[hints.modifiers]
-super = "theme:mauve"
-"super+shift" = "theme:blue"
-ctrl = "theme:peach"
-[hints.submaps]
-resize = "theme:teal"
-
-[[profiles]]
-name = "default"
-colors = ["theme:mauve", "theme:blue", "theme:teal", "theme:peach"]
 
 [[profiles]]
 name = "game"

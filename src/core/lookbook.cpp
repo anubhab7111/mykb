@@ -15,14 +15,13 @@ namespace {
 Duration millis(std::uint32_t ms) { return std::chrono::milliseconds(ms); }
 
 std::map<std::string, Rgb, std::less<>>
-resolve_apps(const std::map<std::string, ColorRef, std::less<>> &apps, const Resolver &resolve) {
+lowercase_apps(const std::map<std::string, Rgb, std::less<>> &apps) {
     std::map<std::string, Rgb, std::less<>> out;
     for (const auto &[key, color] : apps) {
         // Keys are matched in lowercase, so lowercase them here instead of trusting the caller.
         // When two keys collide, `emplace` keeps the first one: `apps` is ordered, so that is the
-        // key that sorts first ("ZapZap" before "zapzap"), and the other is dropped silently. Its
-        // color is still resolved, so every color of the settings is resolved exactly once.
-        out.emplace(to_lower(key), resolve(color));
+        // key that sorts first ("ZapZap" before "zapzap"), and the other is dropped silently.
+        out.emplace(to_lower(key), color);
     }
     return out;
 }
@@ -46,25 +45,34 @@ std::vector<std::string> identities(const signal::Notified &n) {
     return ids;
 }
 
+/// A lamp with no color is off: no zones.
+LampStyle lamp(std::vector<Zone> zones, std::optional<Rgb> color, int blinks, Duration blink,
+               std::optional<Duration> ttl) {
+    if (!color) {
+        zones.clear();
+    }
+    return LampStyle{std::move(zones), color.value_or(Rgb{}), blinks, blink, ttl};
+}
+
 } // namespace
 
-LookBook::LookBook(const ReactionsCfg &cfg, const Resolver &resolve)
+LookBook::LookBook(const ReactionsCfg &cfg)
     : step_(millis(cfg.step_ms)), blink_(millis(cfg.blink_ms)), max_per_minute_(cfg.max_per_minute),
-      window_cooldown_(millis(cfg.window.cooldown_ms)),
-      workspace_color_(resolve(cfg.workspace.color)), wasd_with_(cfg.workspace.wasd_with),
-      window_open_(cfg.window.open), window_close_(cfg.window.close),
-      notify_{resolve(cfg.notify.color), resolve(cfg.notify.critical), cfg.notify.min_urgency,
-              cfg.notify.skip_if_focused, resolve_apps(cfg.notify.apps, resolve)},
-      urgent_{cfg.urgent.zones, resolve(cfg.urgent.color), cfg.urgent.blinks, blink_, std::nullopt},
-      agent_{cfg.agent.zones, resolve(cfg.agent.waiting), cfg.agent.blinks, blink_,
-             std::chrono::seconds(cfg.agent.ttl_s)},
-      agent_done_(resolve(cfg.agent.done)) {}
+      window_cooldown_(millis(cfg.window.cooldown_ms)), workspace_color_(cfg.workspace.color),
+      wasd_with_(cfg.workspace.wasd_with), window_open_(cfg.window.open),
+      window_close_(cfg.window.close),
+      notify_{cfg.notify.color, cfg.notify.critical, cfg.notify.min_urgency,
+              cfg.notify.skip_if_focused, lowercase_apps(cfg.notify.apps)},
+      urgent_(lamp(cfg.urgent.zones, cfg.urgent.color, cfg.urgent.blinks, blink_, std::nullopt)),
+      agent_(lamp(cfg.agent.zones, cfg.agent.waiting, cfg.agent.blinks, blink_,
+                  std::chrono::seconds(cfg.agent.ttl_s))),
+      agent_done_(cfg.agent.done) {}
 
 std::optional<Clip> LookBook::workspace(int from, int to) const {
-    if (from == to) {
+    if (from == to || !workspace_color_) {
         return std::nullopt;
     }
-    return sweep(to > from ? Direction::Up : Direction::Down, workspace_color_, wasd_with_, step_);
+    return sweep(to > from ? Direction::Up : Direction::Down, *workspace_color_, wasd_with_, step_);
 }
 
 std::optional<Clip> LookBook::window_opened() const {
@@ -91,10 +99,10 @@ std::optional<Clip> LookBook::notified(const signal::Notified &n,
         std::ranges::find(ids, to_lower(focused_class)) != ids.end()) {
         return std::nullopt;
     }
-    Rgb color = notify_.color;
-    if (n.urgency == Urgency::Critical) {
+    std::optional<Rgb> color = notify_.color;
+    if (n.urgency == Urgency::Critical && notify_.critical) {
         color = notify_.critical;
-    } else {
+    } else if (n.urgency != Urgency::Critical) {
         for (const std::string &id : ids) {
             if (const auto app = notify_.apps.find(id); app != notify_.apps.end()) {
                 color = app->second;
@@ -102,15 +110,18 @@ std::optional<Clip> LookBook::notified(const signal::Notified &n,
             }
         }
     }
+    if (!color) {
+        return std::nullopt;
+    }
     const std::vector<Zone> all(kAllZones.begin(), kAllZones.end());
-    return flash(color, all, 1, blink_, blink_);
+    return flash(*color, all, 1, blink_, blink_);
 }
 
 std::optional<Clip> LookBook::agent_done() const {
-    if (agent_.zones.empty()) {
+    if (agent_.zones.empty() || !agent_done_) {
         return std::nullopt;
     }
-    return flash(agent_done_, agent_.zones, 1, blink_, blink_);
+    return flash(*agent_done_, agent_.zones, 1, blink_, blink_);
 }
 
 LampStyle LookBook::urgent_style() const { return urgent_; }

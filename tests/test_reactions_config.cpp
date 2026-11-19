@@ -44,28 +44,26 @@ TEST(ReactionsConfig, EmptyTableTurnsItOnWithTheSpecDefaults) {
     EXPECT_EQ(r.blink_ms, 150u);
     EXPECT_EQ(r.max_per_minute, 30u);
 
-    EXPECT_EQ(r.workspace.color.to_string(), "theme:lavender");
+    EXPECT_FALSE(r.workspace.color) << "no color is built in";
     EXPECT_EQ(r.workspace.wasd_with, WasdWith::Left);
 
     EXPECT_DOUBLE_EQ(r.window.open, 0.5);
     EXPECT_DOUBLE_EQ(r.window.close, 0.35);
     EXPECT_EQ(r.window.cooldown_ms, 500u);
 
-    EXPECT_EQ(r.notify.color.to_string(), "theme:blue");
-    EXPECT_EQ(r.notify.critical.to_string(), "theme:red");
+    EXPECT_FALSE(r.notify.color);
+    EXPECT_FALSE(r.notify.critical);
     EXPECT_EQ(r.notify.min_urgency, Urgency::Normal);
     EXPECT_TRUE(r.notify.skip_if_focused);
-    ASSERT_EQ(r.notify.apps.size(), 2u);
-    EXPECT_EQ(r.notify.apps.at("zapzap").to_string(), "theme:green");
-    EXPECT_EQ(r.notify.apps.at("discord").to_string(), "#5865F2");
+    EXPECT_TRUE(r.notify.apps.empty());
 
     EXPECT_EQ(r.urgent.zones, std::vector<Zone>{Zone::Right});
-    EXPECT_EQ(r.urgent.color.to_string(), "theme:yellow");
+    EXPECT_FALSE(r.urgent.color);
     EXPECT_EQ(r.urgent.blinks, 2);
 
     EXPECT_EQ(r.agent.zones, std::vector<Zone>{Zone::Wasd});
-    EXPECT_EQ(r.agent.waiting.to_string(), "theme:peach");
-    EXPECT_EQ(r.agent.done.to_string(), "theme:green");
+    EXPECT_FALSE(r.agent.waiting);
+    EXPECT_FALSE(r.agent.done);
     EXPECT_EQ(r.agent.blinks, 2);
     EXPECT_EQ(r.agent.ttl_s, 3600u);
 
@@ -90,7 +88,7 @@ open = 1
 close = 0
 cooldown_ms = 0
 [reactions.notify]
-color = "theme:mauve"
+color = "#cba6f7"
 critical = "#ff0000"
 min_urgency = "Low"
 skip_if_focused = false
@@ -100,7 +98,7 @@ color = "#00ff00"
 blinks = 0
 [reactions.agent]
 zones = ["middle"]
-waiting = "theme:teal"
+waiting = "#94e2d5"
 done = "#0000ff"
 blinks = 5
 ttl_s = 60
@@ -109,22 +107,22 @@ ttl_s = 60
     EXPECT_EQ(r.step_ms, 80u);
     EXPECT_EQ(r.blink_ms, 200u);
     EXPECT_EQ(r.max_per_minute, 10u);
-    EXPECT_EQ(r.workspace.color.to_string(), "#112233");
+    EXPECT_EQ(r.workspace.color, (Rgb{0x11, 0x22, 0x33}));
     EXPECT_EQ(r.workspace.wasd_with, WasdWith::None);
     EXPECT_DOUBLE_EQ(r.window.open, 1.0);
     EXPECT_DOUBLE_EQ(r.window.close, 0.0);
     EXPECT_EQ(r.window.cooldown_ms, 0u);
-    EXPECT_EQ(r.notify.color.to_string(), "theme:mauve");
-    EXPECT_EQ(r.notify.critical.to_string(), "#FF0000");
+    EXPECT_EQ(r.notify.color, (Rgb{0xcb, 0xa6, 0xf7}));
+    EXPECT_EQ(r.notify.critical, (Rgb{0xFF, 0x00, 0x00}));
     EXPECT_EQ(r.notify.min_urgency, Urgency::Low);
     EXPECT_FALSE(r.notify.skip_if_focused);
-    EXPECT_EQ(r.notify.apps.size(), 2u); // no [reactions.notify.apps]: the defaults stay
+    EXPECT_TRUE(r.notify.apps.empty());
     EXPECT_EQ(r.urgent.zones, (std::vector<Zone>{Zone::Left, Zone::Wasd}));
-    EXPECT_EQ(r.urgent.color.to_string(), "#00FF00");
+    EXPECT_EQ(r.urgent.color, (Rgb{0x00, 0xFF, 0x00}));
     EXPECT_EQ(r.urgent.blinks, 0);
     EXPECT_EQ(r.agent.zones, std::vector<Zone>{Zone::Middle});
-    EXPECT_EQ(r.agent.waiting.to_string(), "theme:teal");
-    EXPECT_EQ(r.agent.done.to_string(), "#0000FF");
+    EXPECT_EQ(r.agent.waiting, (Rgb{0x94, 0xe2, 0xd5}));
+    EXPECT_EQ(r.agent.done, (Rgb{0x00, 0x00, 0xFF}));
     EXPECT_EQ(r.agent.blinks, 5);
     EXPECT_EQ(r.agent.ttl_s, 60u);
 }
@@ -299,7 +297,8 @@ TEST(ReactionsConfig, ZonesColorsAndUrgencyAreValidated) {
         {"[reactions.workspace]\ncolor = 7", "reactions.workspace: `color` must be a string"},
         {"[reactions.notify]\ncolor = 'nope'", "reactions.notify: `color`: invalid color"},
         {"[reactions.notify]\ncritical = '#12'", "reactions.notify: `critical`: invalid color"},
-        {"[reactions.urgent]\ncolor = 'theme:'", "reactions.urgent: `color`: invalid color"},
+        {"[reactions.urgent]\ncolor = 'theme:mauve'",
+         "reactions.urgent: `color`: \"theme:mauve\": theme colors were removed"},
         {"[reactions.agent]\nwaiting = 'red'", "reactions.agent: `waiting`: invalid color"},
         {"[reactions.agent]\ndone = ''", "reactions.agent: `done`: invalid color"},
         {"[reactions.notify]\nmin_urgency = 'loud'",
@@ -374,12 +373,12 @@ TEST(ReactionsConfig, ZoneErrorsNameTheZonesKeyLikeTheOtherFields) {
 
 TEST(ReactionsConfig, NotifyAppKeysAreLowercased) {
     const ReactionsCfg r = reactions_of(
-        "[reactions.notify]\napps = { ZapZap = \"theme:green\", \"Com.Example.App\" = '#010203' }");
+        "[reactions.notify]\napps = { ZapZap = \"#a6e3a1\", \"Com.Example.App\" = '#010203' }");
     EXPECT_TRUE(r.notify.apps.contains("zapzap"));
     EXPECT_FALSE(r.notify.apps.contains("ZapZap"));
     EXPECT_TRUE(r.notify.apps.contains("com.example.app"));
-    EXPECT_EQ(r.notify.apps.at("zapzap").to_string(), "theme:green");
-    EXPECT_EQ(r.notify.apps.at("com.example.app").to_string(), "#010203");
+    EXPECT_EQ(r.notify.apps.at("zapzap"), (Rgb{0xa6, 0xe3, 0xa1}));
+    EXPECT_EQ(r.notify.apps.at("com.example.app"), (Rgb{0x01, 0x02, 0x03}));
     // A table that is present replaces the defaults, so `discord` is gone and the user can drop it.
     EXPECT_EQ(r.notify.apps.size(), 2u);
     EXPECT_FALSE(r.notify.apps.contains("discord"));
@@ -389,7 +388,7 @@ TEST(ReactionsConfig, NotifyAppKeysAreLowercased) {
 }
 
 TEST(ReactionsConfig, AppKeysThatCollideAfterLowercasingAreRejected) {
-    const auto c = parse("[reactions.notify.apps]\nZapZap = 'theme:green'\nzapzap = '#000000'");
+    const auto c = parse("[reactions.notify.apps]\nZapZap = '#a6e3a1'\nzapzap = '#000000'");
     ASSERT_FALSE(c.has_value());
     EXPECT_EQ(c.error(), "reactions.notify.apps: duplicate app `zapzap`");
 }
@@ -397,31 +396,30 @@ TEST(ReactionsConfig, AppKeysThatCollideAfterLowercasingAreRejected) {
 TEST(ReactionsConfig, AnUnquotedDottedAppKeyIsToldToBeQuoted) {
     // TOML reads `com.example.app = ...` as the nested tables com -> example -> app, which used to
     // surface as "reactions.notify.apps.com must be a color string".
-    const auto dotted = parse("[reactions.notify.apps]\ncom.example.app = 'theme:blue'");
+    const auto dotted = parse("[reactions.notify.apps]\ncom.example.app = '#89b4fa'");
     ASSERT_FALSE(dotted.has_value());
     EXPECT_EQ(dotted.error(), "reactions.notify.apps: key `com.example.app` contains dots and "
                               "must be quoted: \"com.example.app\" = ...");
 
     // Two keys under one dotted prefix still give a concrete hint: the first in key order.
-    const auto two =
-        parse("[reactions.notify.apps]\norg.a.two = '#000000'\norg.a.one = 'theme:blue'");
+    const auto two = parse("[reactions.notify.apps]\norg.a.two = '#000000'\norg.a.one = '#89b4fa'");
     ASSERT_FALSE(two.has_value());
     EXPECT_EQ(two.error(), "reactions.notify.apps: key `org.a.one` contains dots and must be "
                            "quoted: \"org.a.one\" = ...");
 
     // An inline table and a `[...apps.zapzap]` header are tables too but hold no dotted key, so
     // the plain message stays for them.
-    const auto inline_table = parse("[reactions.notify.apps]\nzapzap = { color = 'theme:blue' }");
+    const auto inline_table = parse("[reactions.notify.apps]\nzapzap = { color = '#89b4fa' }");
     ASSERT_FALSE(inline_table.has_value());
     EXPECT_EQ(inline_table.error(), "reactions.notify.apps.zapzap must be a color string");
-    const auto header = parse("[reactions.notify.apps.zapzap]\ncolor = 'theme:blue'");
+    const auto header = parse("[reactions.notify.apps.zapzap]\ncolor = '#89b4fa'");
     ASSERT_FALSE(header.has_value());
     EXPECT_EQ(header.error(), "reactions.notify.apps.zapzap must be a color string");
 
     // The quoted form is the fix, and it keeps working.
     const ReactionsCfg quoted =
-        reactions_of("[reactions.notify.apps]\n\"com.example.app\" = 'theme:blue'");
-    EXPECT_EQ(quoted.notify.apps.at("com.example.app").to_string(), "theme:blue");
+        reactions_of("[reactions.notify.apps]\n\"com.example.app\" = '#89b4fa'");
+    EXPECT_EQ(quoted.notify.apps.at("com.example.app"), (Rgb{0x89, 0xb4, 0xfa}));
 }
 
 TEST(ReactionsConfig, TheShippedExampleBlockMatchesTheDefaults) {

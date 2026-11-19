@@ -195,34 +195,4 @@ std::expected<Response, IpcError> request(const std::filesystem::path &path, con
     return *resp;
 }
 
-std::expected<std::optional<Status>, IpcError> Subscription::next_status() {
-    auto line = read_line(fd_.get(), lines_);
-    if (!line) {
-        return std::unexpected(line.error());
-    }
-    if (!*line) {
-        return std::optional<Status>{};
-    }
-    auto resp = decode_response(**line);
-    if (!resp) {
-        return std::unexpected(IpcError{IpcError::Kind::Protocol, resp.error()});
-    }
-    if (resp->status) {
-        return std::move(resp->status);
-    }
-    return std::unexpected(IpcError{IpcError::Kind::Protocol,
-                                    resp->error.value_or("subscription message without status")});
-}
-
-std::expected<Subscription, IpcError> subscribe(const std::filesystem::path &path) {
-    auto fd = connect_to(path);
-    if (!fd) {
-        return std::unexpected(fd.error());
-    }
-    if (auto s = send_line(fd->get(), encode(Request{req::Subscribe{}}) + "\n"); !s) {
-        return std::unexpected(s.error());
-    }
-    return Subscription(std::move(*fd));
-}
-
 } // namespace omenkbd

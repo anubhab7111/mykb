@@ -20,8 +20,6 @@ using tomlr::opt;
 using tomlr::opt_int_in;
 using tomlr::sub_table;
 
-constexpr std::array<std::string_view, 4> kModifierOrder{"super", "ctrl", "alt", "shift"};
-
 using Err = std::unexpected<std::string>;
 
 std::expected<GateAction, std::string> gate_action(std::string_view s, std::string_view field) {
@@ -86,31 +84,6 @@ std::expected<void, std::string> parse_effects(const toml::table &t, EffectsCfg 
     return {};
 }
 
-std::expected<void, std::string> parse_theme(const toml::table &t, ThemeCfg &out,
-                                             std::string &dir) {
-    OMENKBD_TRY(check_keys(t, {"colors", "dir"}, "theme"));
-    auto colors = opt<std::string>(t, "colors", "theme");
-    if (!colors) {
-        return Err(colors.error());
-    }
-    if (*colors) {
-        const auto mode = theme_colors_from_name(**colors);
-        if (!mode) {
-            return Err(
-                std::format("theme.colors must be \"vivid\" or \"exact\", got \"{}\"", **colors));
-        }
-        out.colors = *mode;
-    }
-    auto d = opt<std::string>(t, "dir", "theme");
-    if (!d) {
-        return Err(d.error());
-    }
-    if (*d) {
-        dir = **d;
-    }
-    return {};
-}
-
 std::expected<void, std::string> parse_gates(const toml::table &t, GatesCfg &out) {
     OMENKBD_TRY(check_keys(t, {"on_lock", "on_idle", "dim_brightness", "pause_effects_on_battery"},
                            "gates"));
@@ -142,64 +115,6 @@ std::expected<void, std::string> parse_gates(const toml::table &t, GatesCfg &out
     return {};
 }
 
-std::expected<std::map<std::string, ColorRef, std::less<>>, std::string>
-parse_color_map(const toml::table &t, std::string_view where, bool modifier_keys) {
-    std::map<std::string, ColorRef, std::less<>> out;
-    for (const auto &[key, node] : t) {
-        std::string k(key.str());
-        if (modifier_keys) {
-            auto n = normalize_mods(k);
-            if (!n) {
-                return Err(std::format("{}: {}", where, n.error()));
-            }
-            k = *n;
-        }
-        const auto s = node.value<std::string>();
-        if (!s) {
-            return Err(std::format("{}.{} must be a color string", where, key.str()));
-        }
-        auto c = ColorRef::parse(*s);
-        if (!c) {
-            return Err(std::format("{}.{}: {}", where, key.str(), c.error()));
-        }
-        out.insert_or_assign(k, *c);
-    }
-    return out;
-}
-
-std::expected<void, std::string> parse_hints(const toml::table &t, HintsCfg &out) {
-    OMENKBD_TRY(check_keys(t, {"timeout_s", "delay_ms", "modifiers", "submaps"}, "hints"));
-    auto timeout = opt_int_in(t, "timeout_s", "hints.timeout_s", 1, 3600);
-    if (!timeout) {
-        return Err(timeout.error());
-    }
-    if (*timeout) {
-        out.timeout_s = static_cast<std::uint64_t>(**timeout);
-    }
-    auto delay = opt_int_in(t, "delay_ms", "hints.delay_ms", 0, 10000);
-    if (!delay) {
-        return Err(delay.error());
-    }
-    if (*delay) {
-        out.delay_ms = static_cast<std::uint64_t>(**delay);
-    }
-    for (auto [key, target, mods] :
-         {std::tuple{"modifiers", &out.modifiers, true}, {"submaps", &out.submaps, false}}) {
-        auto sub = sub_table(t, key, "hints");
-        if (!sub) {
-            return Err(sub.error());
-        }
-        if (*sub != nullptr) {
-            auto m = parse_color_map(**sub, std::format("hints.{}", key), mods);
-            if (!m) {
-                return Err(m.error());
-            }
-            *target = std::move(*m);
-        }
-    }
-    return {};
-}
-
 std::expected<ProfileCfg, std::string> parse_profile(const toml::table &t) {
     ProfileCfg p;
     auto name = opt<std::string>(t, "name", "profiles");
@@ -218,7 +133,7 @@ std::expected<ProfileCfg, std::string> parse_profile(const toml::table &t) {
     }
     for (const toml::node &n : *colors) {
         const auto s = n.value<std::string>();
-        auto c = s ? ColorRef::parse(*s) : Err(std::string("expected a color string"));
+        auto c = s ? Rgb::parse(*s) : Err(std::string("expected a color string"));
         if (!c) {
             return Err(std::format("{}: colors: {}", where, c.error()));
         }
@@ -236,8 +151,9 @@ std::expected<ProfileCfg, std::string> parse_profile(const toml::table &t) {
     if (*effect) {
         const auto e = effect_from_name(**effect);
         if (!e) {
-            return Err(std::format("{}: unknown effect \"{}\" (expected static, drift, glow, tide or dusk)",
-                                   where, **effect));
+            return Err(std::format(
+                "{}: unknown effect \"{}\" (expected static, drift, glow, tide or dusk)", where,
+                **effect));
         }
         p.effect = *e;
     }
@@ -269,12 +185,10 @@ std::expected<Config, std::string> parse_config(std::string_view text) {
         return Err(
             std::format("TOML error at line {}: {}", e.source().begin.line, e.description()));
     }
-    OMENKBD_TRY(check_keys(
-        root, {"device", "effects", "theme", "gates", "hints", "reactions", "profiles", "rules"},
-        ""));
+    OMENKBD_TRY(
+        check_keys(root, {"device", "effects", "gates", "reactions", "profiles", "rules"}, ""));
 
     Config c;
-    std::string theme_dir = "~/.config/theming/current";
     const auto section = [&](std::string_view key) { return sub_table(root, key); };
 
     if (auto s = section("device"); !s) {
@@ -287,21 +201,10 @@ std::expected<Config, std::string> parse_config(std::string_view text) {
     } else if (*s != nullptr) {
         OMENKBD_TRY(parse_effects(**s, c.effects));
     }
-    if (auto s = section("theme"); !s) {
-        return Err(s.error());
-    } else if (*s != nullptr) {
-        OMENKBD_TRY(parse_theme(**s, c.theme, theme_dir));
-    }
-    c.theme.dir = expand_home(theme_dir);
     if (auto s = section("gates"); !s) {
         return Err(s.error());
     } else if (*s != nullptr) {
         OMENKBD_TRY(parse_gates(**s, c.gates));
-    }
-    if (auto s = section("hints"); !s) {
-        return Err(s.error());
-    } else if (*s != nullptr) {
-        OMENKBD_TRY(parse_hints(**s, c.hints));
     }
     if (auto s = section("reactions"); !s) {
         return Err(s.error());
@@ -379,37 +282,6 @@ std::filesystem::path config_path() {
     const std::filesystem::path base =
         (xdg != nullptr && *xdg != '\0') ? std::filesystem::path(xdg) : expand_home("~/.config");
     return base / "omen-kbd/config.toml";
-}
-
-std::expected<std::string, std::string> normalize_mods(std::string_view s) {
-    std::array<bool, 4> present{};
-    std::size_t start = 0;
-    while (start <= s.size()) {
-        const std::size_t plus = s.find('+', start);
-        const std::string part =
-            to_lower(trim(s.substr(start, plus == std::string_view::npos ? s.npos : plus - start)));
-        const auto it = std::ranges::find(kModifierOrder, part);
-        if (it == kModifierOrder.end()) {
-            return Err(std::format(
-                "unknown modifier \"{}\" in \"{}\" (use super, ctrl, alt, shift joined by +)", part,
-                s));
-        }
-        present[static_cast<std::size_t>(it - kModifierOrder.begin())] = true;
-        if (plus == std::string_view::npos) {
-            break;
-        }
-        start = plus + 1;
-    }
-    std::string out;
-    for (std::size_t i = 0; i < kModifierOrder.size(); ++i) {
-        if (present[i]) {
-            if (!out.empty()) {
-                out += '+';
-            }
-            out += kModifierOrder[i];
-        }
-    }
-    return out;
 }
 
 std::filesystem::path expand_home(std::string_view p) {

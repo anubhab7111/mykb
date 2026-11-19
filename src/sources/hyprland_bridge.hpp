@@ -27,7 +27,7 @@ class HyprlandBridge {
     HyprlandBridge &operator=(const HyprlandBridge &) = delete;
 
     /// Signals (workspace, windows, urgency, focus) are forwarded only while `reactions_on`. The
-    /// fullscreen fact and the submap always are. The tracker follows Hyprland either way, so a
+    /// fullscreen fact always is. The tracker follows Hyprland either way, so a
     /// switch takes effect at once: on the change from off to on, the focus and urgent windows it
     /// holds are delivered as signals, once (P25).
     ///
@@ -45,7 +45,6 @@ class HyprlandBridge {
     void on_hypr(const HyprEvent &ev);
     void deliver(const Signal &s);
     void deliver(const FactUpdate &f);
-    void deliver(const event::Submap &m);
     void deliver(const CheckFullscreen &check);
     /// A new question about fullscreen: drops a pending retry, then asks (if wanted).
     void check_fullscreen();

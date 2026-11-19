@@ -28,10 +28,6 @@ using namespace std::chrono_literals;
 namespace {
 
 constexpr std::string_view kStaticCfg = R"(
-[hints]
-timeout_s = 1
-[hints.modifiers]
-super = "#0000ff"
 [[profiles]]
 name = "plain"
 colors = ["#101010", "#202020", "#303030", "#404040"]
@@ -41,8 +37,6 @@ constexpr std::string_view kWaveCfg = R"(
 [effects]
 enabled = true
 fps = 10
-[hints]
-timeout_s = 1
 [[profiles]]
 name = "wavy"
 colors = ["#ff0000", "#00ff00", "#0000ff", "#ffffff"]
@@ -54,7 +48,9 @@ Rgb rgb(std::string_view hex) { return Rgb::parse(hex).value(); }
 
 std::array<Rgb, 4> all(Rgb c) { return {c, c, c, c}; }
 
-Request set(std::vector<std::string> colors) { return req::Set{std::move(colors)}; }
+Request set(std::vector<std::string> look) {
+    return req::Set{std::move(look), std::nullopt, std::nullopt};
+}
 
 /// `text` with its first `from` replaced by `to`.
 std::string replaced_once(std::string_view text, std::string_view from, std::string_view to) {
@@ -128,7 +124,7 @@ class DaemonTest : public ::testing::Test {
         write_file(config_path(), cfg_toml);
         Config config = parse_config(cfg_toml).value();
         const std::string first = config.profiles.front().name;
-        Model model(std::move(config), Palette{}, PersistedState::default_for(first), "mock");
+        Model model(std::move(config), PersistedState::default_for(first), "mock");
         auto [backend, handle] = make_mock(false);
         h_.emplace(std::move(handle));
         auto listen = bind_socket(sock());
@@ -376,7 +372,7 @@ TEST_F(DaemonTest, ToggleAfterFnKeyOffWorksAfterAnOffOnSequence) {
     ASSERT_TRUE(req(req::Brightness{"100"}).ok);
     ASSERT_TRUE(req(req::Power{req::PowerAction::Off}).ok);
     ASSERT_TRUE(req(req::Power{req::PowerAction::On}).ok);
-    ASSERT_TRUE(req(req::Profile{"plain"}).ok);
+    ASSERT_TRUE(req(set({"plain"})).ok);
     h().set_hw_backlight(false); // the Fn key
     EXPECT_FALSE(status().on);
     auto expected = h().ops();
@@ -572,7 +568,7 @@ TEST_F(DaemonTest, BadReloadKeepsPreviousConfig) {
     EXPECT_EQ(status().profile, "plain");
 }
 
-// Not in the Rust suite: sources (hwmon, theme watcher) are rebuilt from the reloaded config.
+// Not in the Rust suite: sources (hwmon) are rebuilt from the reloaded config.
 TEST_F(DaemonTest, ReloadNotifiesConfigListenersOnlyOnSuccess) {
     std::atomic<int> calls{0};
     std::atomic<bool> needs_temp{false};
@@ -592,17 +588,6 @@ TEST_F(DaemonTest, ReloadNotifiesConfigListenersOnlyOnSuccess) {
     EXPECT_TRUE(req(req::Reload{}).ok);
     EXPECT_EQ(calls.load(), 1);
     EXPECT_TRUE(needs_temp.load());
-}
-
-TEST_F(DaemonTest, HintClearsAfterTimeout) {
-    start(kStaticCfg);
-    const Response r = req(req::Hint{"super"});
-    EXPECT_TRUE(r.ok) << r.error.value_or("");
-    EXPECT_EQ(status().hint, "super");
-    EXPECT_EQ(zone_writes().back(), all(rgb("0000ff")));
-    std::this_thread::sleep_for(1300ms);
-    EXPECT_EQ(status().hint, std::nullopt);
-    EXPECT_EQ(zone_writes().back()[2], rgb("101010"));
 }
 
 TEST_F(DaemonTest, PersistDebouncedOneSecond) {
@@ -626,24 +611,6 @@ TEST_F(DaemonTest, FactsChangeTheFrame) {
     const std::array<Rgb, 4> want{rgb("181818"), rgb("101010"), rgb("080808"), rgb("202020")};
     EXPECT_TRUE(wait_until([&] { return zone_writes().back() == want; }, 2000ms))
         << zone_writes().back()[0];
-}
-
-TEST_F(DaemonTest, SubscribeStreamsStatusChanges) {
-    start(kStaticCfg);
-    auto sub = subscribe(sock());
-    ASSERT_TRUE(sub.has_value()) << sub.error().message();
-    const auto first = sub->next_status();
-    ASSERT_TRUE(first.has_value() && first->has_value());
-    EXPECT_EQ((*first)->brightness, 100);
-    EXPECT_TRUE(req(req::Brightness{"40"}).ok);
-    auto next = std::async(std::launch::async, [&] { return sub->next_status(); });
-    if (next.wait_for(2s) != std::future_status::ready) {
-        stop_daemon(); // closes the stream so the reader returns
-        FAIL() << "no status update within 2 s";
-    }
-    const auto s = next.get();
-    ASSERT_TRUE(s.has_value() && s->has_value());
-    EXPECT_EQ((*s)->brightness, 40);
 }
 
 // Not in the Rust suite: the hand-written C++ connection handling.
@@ -836,7 +803,7 @@ TEST_F(DaemonTest, FloodWhileAReadIsPendingStaysBounded) {
 // Ruling P16: while an effect ticks, a signal adds no frame of its own; the ticks sample it.
 TEST_F(DaemonTest, SignalsOnARunningEffectAddNoWrites) {
     start(kRigConfig);
-    ASSERT_TRUE(req(req::Profile{"wavy"}).ok);
+    ASSERT_TRUE(req(set({"wavy"})).ok);
     EXPECT_TRUE(status().animated); // also a fresh reading: no signal below waits for a read
     const auto a = zone_writes().size();
     const auto end = Clock::now() + 1s;

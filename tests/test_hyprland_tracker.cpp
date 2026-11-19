@@ -20,8 +20,6 @@ template <class S> TrackerOut sig(S s) { return TrackerOut{Signal{std::move(s)}}
 
 TrackerOut check() { return TrackerOut{CheckFullscreen{}}; }
 
-TrackerOut submap_cleared() { return TrackerOut{event::Submap{std::nullopt}}; }
-
 TrackerOut fullscreen_cleared() {
     return TrackerOut{FactUpdate{fact::FullscreenApp{std::nullopt}}};
 }
@@ -35,7 +33,6 @@ void focus(HyprlandTracker &t, const std::string &app_class, const std::string &
 } // namespace
 
 TEST(HyprlandParse, ParsesEveryEventWeUse) {
-    EXPECT_EQ(parse_socket2_line("submap>>resize"), HyprEvent{hypr::Submap{"resize"}});
     EXPECT_EQ(parse_socket2_line("workspacev2>>2,2"), HyprEvent{hypr::WorkspaceV2{2}});
     EXPECT_EQ(parse_socket2_line("workspacev2>>-99,special:magic"),
               HyprEvent{hypr::WorkspaceV2{-99}})
@@ -115,7 +112,6 @@ TEST(HyprlandParse, MalformedLinesAreIgnoredNotThrown) {
         "activewindow>>" + big,
         "activewindowv2>>" + big_hex,
         "closewindow>>" + big_hex,
-        "submap>>" + big,
     };
     for (const std::string &line : bad) {
         EXPECT_EQ(parse_socket2_line(line), std::nullopt)
@@ -127,8 +123,8 @@ TEST(HyprlandParse, MalformedLinesAreIgnoredNotThrown) {
 // still parses while one byte more is dropped.
 TEST(HyprlandParse, EmbeddedNulAndThe64KiBBoundary) {
     using namespace std::string_literals;
-    EXPECT_EQ(parse_socket2_line("submap>>a\0b"s), HyprEvent{hypr::Submap{"a\0b"s}})
-        << "the name is kept whole";
+    EXPECT_EQ(parse_socket2_line("activewindow>>a\0b"s), HyprEvent{hypr::ActiveWindow{"a\0b"s}})
+        << "the class is kept whole";
     EXPECT_EQ(parse_socket2_line("activewindow>>kit\0ty,a \0 title"s),
               HyprEvent{hypr::ActiveWindow{"kit\0ty"s}});
     EXPECT_EQ(parse_socket2_line("urgent>>ab\0cd"s), std::nullopt) << "not an address";
@@ -140,9 +136,9 @@ TEST(HyprlandParse, EmbeddedNulAndThe64KiBBoundary) {
     EXPECT_EQ(parse_socket2_line("workspacev2>>4\0,x"s), std::nullopt);
 
     constexpr std::size_t kMax = std::size_t{64} * 1024;
-    const std::string prefix = "submap>>";
+    const std::string prefix = "activewindow>>";
     const std::string name(kMax - prefix.size(), 'n');
-    EXPECT_EQ(parse_socket2_line(prefix + name), HyprEvent{hypr::Submap{name}})
+    EXPECT_EQ(parse_socket2_line(prefix + name), HyprEvent{hypr::ActiveWindow{name}})
         << "exactly 64 KiB parses";
     EXPECT_EQ(parse_socket2_line(prefix + name + "n"), std::nullopt) << "one byte more does not";
     const std::string title(kMax - std::string("activewindow>>kitty,").size(), 't');
@@ -182,12 +178,10 @@ TEST(HyprlandParse, AnInvalidAddressMakesTheLineMalformed) {
         << "an empty first field is empty too";
 }
 
-TEST(HyprlandParse, SubmapStillParses) {
-    EXPECT_EQ(parse_socket2_line("submap>>resize"), HyprEvent{hypr::Submap{"resize"}});
-    EXPECT_EQ(parse_socket2_line("submap>>"), HyprEvent{hypr::Submap{std::nullopt}})
-        << "an empty name is the default submap";
-    EXPECT_EQ(parse_socket2_line("submap>>a,b >> c"), HyprEvent{hypr::Submap{"a,b >> c"}})
-        << "the name is everything after the first >>";
+TEST(HyprlandParse, SubmapsAreNotUsed) {
+    for (const char *line : {"submap>>resize", "submap>>", "submap>>a,b >> c"}) {
+        EXPECT_EQ(parse_socket2_line(line), std::nullopt) << line;
+    }
 }
 
 TEST(HyprlandTracker, FirstWorkspaceEventOnlyRecordsTheId) {
@@ -302,24 +296,16 @@ TEST(HyprlandTracker, FocusWorkspaceFullscreenAndCloseRequestAFullscreenCheck) {
     EXPECT_FALSE(has_check(hypr::OpenWindow{"a2"}));
     EXPECT_FALSE(has_check(hypr::Urgent{"a2"}));
     EXPECT_FALSE(has_check(hypr::ActiveWindow{"kitty"}));
-    EXPECT_FALSE(has_check(hypr::Submap{"resize"}));
     EXPECT_FALSE(has_check(hypr::WorkspaceV2{-99}));
 }
 
-TEST(HyprlandTracker, SubmapPassesThrough) {
-    HyprlandTracker t;
-    EXPECT_EQ(t.on(hypr::Submap{"resize"}), (Out{TrackerOut{event::Submap{"resize"}}}));
-    EXPECT_EQ(t.on(hypr::Submap{std::nullopt}), (Out{submap_cleared()}));
-}
-
-TEST(HyprlandTracker, DisconnectClearsUrgentFullscreenAndSubmap) {
+TEST(HyprlandTracker, DisconnectClearsUrgentAndFullscreen) {
     HyprlandTracker t;
     (void)t.on(hypr::WorkspaceV2{1});
     focus(t, "kitty", "a1");
     (void)t.on(hypr::Urgent{"a2"});
-    EXPECT_EQ(t.on(hypr::Disconnected{}),
-              (Out{sig(signal::UrgentReset{}), fullscreen_cleared(), submap_cleared(),
-                   sig(signal::FocusChanged{"", ""})}))
+    EXPECT_EQ(t.on(hypr::Disconnected{}), (Out{sig(signal::UrgentReset{}), fullscreen_cleared(),
+                                               sig(signal::FocusChanged{"", ""})}))
         << "T14-4: the focus (and its class) is forgotten downstream too";
     EXPECT_EQ(t.replay(), std::vector<Signal>{}) << "and no focus is held to replay";
     // The state is gone too: the old urgent window clears nothing, the first workspace only
@@ -375,9 +361,8 @@ TEST(HyprlandTracker, RepeatedActiveWindowForTheSameWindowIsIgnored) {
               (Out{sig(signal::FocusChanged{"a1", "kitty"}), check()}))
         << "after Connected the first focus event emits again";
 
-    EXPECT_EQ(t.on(hypr::Disconnected{}),
-              (Out{sig(signal::UrgentReset{}), fullscreen_cleared(), submap_cleared(),
-                   sig(signal::FocusChanged{"", ""})}));
+    EXPECT_EQ(t.on(hypr::Disconnected{}), (Out{sig(signal::UrgentReset{}), fullscreen_cleared(),
+                                               sig(signal::FocusChanged{"", ""})}));
     (void)t.on(hypr::ActiveWindow{"kitty"});
     EXPECT_EQ(t.on(hypr::ActiveWindowV2{"a1"}),
               (Out{sig(signal::FocusChanged{"a1", "kitty"}), check()}))

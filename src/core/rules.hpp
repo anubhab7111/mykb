@@ -2,7 +2,7 @@
 // Declarative rules: conditions over system facts that switch the profile, cap brightness, or add
 // an overlay. Evaluation is first-match per category.
 
-#include "core/palette.hpp"
+#include "core/color.hpp"
 #include "core/zones.hpp"
 
 #include <cstdint>
@@ -49,12 +49,12 @@ struct Condition {
 
 struct OverlayCfg {
     std::vector<Zone> zones;
-    ColorRef color = ColorRef::hex(kBlack);
+    Rgb color = kBlack;
     bool pulse = false;
 };
 
 struct TintCfg {
-    ColorRef color = ColorRef::hex(kBlack);
+    Rgb color = kBlack;
     double strength = 0.0;
 };
 
@@ -74,16 +74,16 @@ struct Rule {
 /// Parses one `[[rules]]` table. Unknown keys (here or in `when`/`overlay`/`tint`) are errors.
 std::expected<Rule, std::string> parse_rule(const toml::table &t);
 
-/// An overlay chosen by the rules, before its colors are resolved against the palette.
+/// An overlay chosen by the rules.
 struct ZonesOverlay {
     std::vector<Zone> zones;
-    ColorRef color;
+    Rgb color;
     bool pulse;
     friend bool operator==(const ZonesOverlay &, const ZonesOverlay &) = default;
 };
 
 struct TintOverlay {
-    ColorRef color;
+    Rgb color;
     double strength;
     friend bool operator==(const TintOverlay &, const TintOverlay &) = default;
 };

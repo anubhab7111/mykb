@@ -24,11 +24,10 @@ struct DoctorEnv {
     std::filesystem::path proc_root;
     std::filesystem::path dkms_root;
     std::filesystem::path hypr_dir;
-    std::filesystem::path theme_dir;
     std::filesystem::path socket;
 
     /// /sys, /proc, /var/lib/dkms, ~/.config/hypr, the config's theme dir and the daemon socket.
-    static DoctorEnv real(const Config &cfg);
+    static DoctorEnv real();
 };
 
 /// Backend, permissions, competing writers, hp-wmi DKMS packages, daemon, Hyprland hooks, theme.

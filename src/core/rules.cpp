@@ -69,13 +69,13 @@ std::expected<Condition, std::string> parse_condition(const toml::table &t,
     return c;
 }
 
-std::expected<ColorRef, std::string> parse_color(const toml::table &t, std::string_view where) {
+std::expected<Rgb, std::string> parse_color(const toml::table &t, std::string_view where) {
     std::optional<std::string> s;
     OMENKBD_TRY(take(opt<std::string>(t, "color", where), s));
     if (!s) {
         return std::unexpected(std::format("{}: missing `color`", where));
     }
-    auto c = ColorRef::parse(*s);
+    auto c = Rgb::parse(*s);
     if (!c) {
         return std::unexpected(std::format("{}: {}", where, c.error()));
     }

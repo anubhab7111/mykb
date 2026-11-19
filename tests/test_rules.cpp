@@ -83,7 +83,7 @@ TEST(Rules, BoolAndThresholdConditions) {
     f.gamemode = true;
     auto out = evaluate(r, f);
     ASSERT_TRUE(out.overlay.has_value());
-    EXPECT_EQ(*out.overlay, (Overlay{TintOverlay{ColorRef::hex({255, 0x40, 0}), 0.5}}));
+    EXPECT_EQ(*out.overlay, (Overlay{TintOverlay{Rgb{255, 0x40, 0}, 0.5}}));
     EXPECT_EQ(out.profile, "game");
 
     Facts cool_locked;
@@ -104,8 +104,7 @@ TEST(Rules, ActiveListsContributors) {
     const auto out = evaluate(r, Facts{});
     EXPECT_EQ(out.active, (std::vector<std::string>{"r1", "r3"}));
     ASSERT_TRUE(out.overlay.has_value());
-    EXPECT_EQ(*out.overlay,
-              (Overlay{ZonesOverlay{{Zone::Right}, ColorRef::hex({255, 0, 0}), true}}));
+    EXPECT_EQ(*out.overlay, (Overlay{ZonesOverlay{{Zone::Right}, Rgb{255, 0, 0}, true}}));
 }
 
 TEST(Rules, OverlayAndTintBothIsInvalid) {

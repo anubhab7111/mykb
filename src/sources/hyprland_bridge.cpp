@@ -71,8 +71,6 @@ void HyprlandBridge::deliver(const FactUpdate &f) {
     emit_(Event{f});
 }
 
-void HyprlandBridge::deliver(const event::Submap &m) { emit_(Event{m}); }
-
 void HyprlandBridge::deliver(const CheckFullscreen & /*check*/) { check_fullscreen(); }
 
 void HyprlandBridge::check_fullscreen() {

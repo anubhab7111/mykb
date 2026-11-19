@@ -19,28 +19,6 @@ std::string join(const std::vector<std::string> &items, std::string_view sep) {
 
 const char *on_off(bool b) { return b ? "on" : "off"; }
 
-/// Waybar renders a module's text and tooltip as Pango markup.
-std::string pango_escape(std::string_view s) {
-    std::string out;
-    out.reserve(s.size());
-    for (const char c : s) {
-        switch (c) {
-        case '&':
-            out += "&amp;";
-            break;
-        case '<':
-            out += "&lt;";
-            break;
-        case '>':
-            out += "&gt;";
-            break;
-        default:
-            out += c;
-        }
-    }
-    return out;
-}
-
 } // namespace
 
 std::string format_status(const Status &s) {
@@ -69,7 +47,6 @@ std::string format_status(const Status &s) {
     line("zones", zones);
     line("brightness",
          std::format("{}%  {}  backlight {}", s.brightness, on_off(s.on), on_off(s.backlight)));
-    line("hint", s.hint.value_or("-"));
     line("rules", s.active_rules.empty() ? "-" : join(s.active_rules, ", "));
     std::string reactions = on_off(s.reactions.enabled);
     if (s.reactions.enabled) {
@@ -92,18 +69,6 @@ std::string format_status(const Status &s) {
         line("warnings", join(s.warnings, "; "));
     }
     return out;
-}
-
-nlohmann::json waybar_json(const Status &s) {
-    const char *cls = (s.last_error || s.budget_exhausted) ? "error"
-                      : !s.on                              ? "off"
-                      : s.hint                             ? "hint"
-                      : s.animated                         ? "effect"
-                                                           : "on";
-    return {{"text", s.on ? "󰌌 " + pango_escape(s.profile) : std::string("󰌐 off")},
-            {"class", cls},
-            {"percentage", s.brightness},
-            {"tooltip", pango_escape(format_status(s))}};
 }
 
 } // namespace omenkbd

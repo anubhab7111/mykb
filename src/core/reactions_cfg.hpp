@@ -4,20 +4,20 @@
 // spec defaults live in reactions_config.hpp; this header only holds the shape.
 
 #include "core/clip.hpp"
-#include "core/palette.hpp"
+#include "core/color.hpp"
 #include "core/signals.hpp"
 #include "core/zones.hpp"
 
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace omenkbd {
 
-/// Every ColorRef member starts black only because a ColorRef cannot be default-constructed; the
-/// real defaults come from `default_reactions()`.
+/// No color is built in: a reaction whose color is not set is off.
 struct ReactionsCfg {
     /// True when the `[reactions]` table is present (and `enabled = false` is not set).
     bool enabled = false;
@@ -27,7 +27,7 @@ struct ReactionsCfg {
     std::uint32_t max_per_minute = 30;
 
     struct Workspace {
-        ColorRef color = ColorRef::hex(kBlack);
+        std::optional<Rgb> color;
         WasdWith wasd_with = WasdWith::Left;
         friend bool operator==(const Workspace &, const Workspace &) = default;
     } workspace;
@@ -43,19 +43,19 @@ struct ReactionsCfg {
     } window;
 
     struct Notify {
-        ColorRef color = ColorRef::hex(kBlack);
-        ColorRef critical = ColorRef::hex(kBlack);
+        std::optional<Rgb> color;
+        std::optional<Rgb> critical;
         Urgency min_urgency = Urgency::Normal;
         bool skip_if_focused = true;
         /// Per-app colors. Keys are lowercase: an app name, a desktop entry or its last segment.
-        std::map<std::string, ColorRef, std::less<>> apps;
+        std::map<std::string, Rgb, std::less<>> apps;
         friend bool operator==(const Notify &, const Notify &) = default;
     } notify;
 
     struct Urgent {
         /// Empty turns the lamp off.
         std::vector<Zone> zones{Zone::Right};
-        ColorRef color = ColorRef::hex(kBlack);
+        std::optional<Rgb> color;
         /// Lit phases of the intro before the light stays steady, 0 to 5.
         int blinks = 2;
         friend bool operator==(const Urgent &, const Urgent &) = default;
@@ -64,8 +64,8 @@ struct ReactionsCfg {
     struct Agent {
         /// Empty turns the lamp off.
         std::vector<Zone> zones{Zone::Wasd};
-        ColorRef waiting = ColorRef::hex(kBlack);
-        ColorRef done = ColorRef::hex(kBlack);
+        std::optional<Rgb> waiting;
+        std::optional<Rgb> done;
         /// 0 to 5, as for `Urgent`.
         int blinks = 2;
         /// How long a light stays without a new event, 60 to 86400.

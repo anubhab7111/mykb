@@ -67,7 +67,6 @@ TEST(KernelContract, DoctorReadsTheModulesInfoLine) {
                             .proc_root = t.path() / "proc",
                             .dkms_root = t.path() / "dkms",
                             .hypr_dir = t.path() / "hypr",
-                            .theme_dir = t.path() / "theme",
                             .socket = t.path() / "omen-kbd.sock"};
         fake_module(env.sys_root);
         hok_info info{};

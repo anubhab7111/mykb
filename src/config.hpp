@@ -1,8 +1,8 @@
 #pragma once
 // User configuration, `~/.config/omen-kbd/config.toml`. The daemon only ever reads this file.
 
+#include "core/color.hpp"
 #include "core/effects.hpp"
-#include "core/palette.hpp"
 #include "core/rules.hpp"
 #include "core/zones.hpp"
 #include "reactions_config.hpp"
@@ -29,12 +29,6 @@ struct EffectsCfg {
     std::uint8_t fps = 10;
 };
 
-struct ThemeCfg {
-    ThemeColors colors = ThemeColors::Vivid;
-    /// Directory holding the current theme's files (`~` already expanded).
-    std::filesystem::path dir;
-};
-
 enum class GateAction { Off, Dim, Keep };
 
 struct GatesCfg {
@@ -44,18 +38,10 @@ struct GatesCfg {
     bool pause_effects_on_battery = true;
 };
 
-struct HintsCfg {
-    std::uint64_t timeout_s = 15;
-    std::uint64_t delay_ms = 250;
-    /// Keys are normalized modifier sets (see normalize_mods).
-    std::map<std::string, ColorRef, std::less<>> modifiers;
-    std::map<std::string, ColorRef, std::less<>> submaps;
-};
-
 struct ProfileCfg {
     std::string name;
     /// One color (all zones) or four (left, middle, right, wasd).
-    std::vector<ColorRef> colors;
+    std::vector<Rgb> colors;
     Effect effect = Effect::Static;
     std::uint8_t speed = 50;
 };
@@ -63,9 +49,7 @@ struct ProfileCfg {
 struct Config {
     DeviceCfg device;
     EffectsCfg effects;
-    ThemeCfg theme;
     GatesCfg gates;
-    HintsCfg hints;
     std::vector<ProfileCfg> profiles;
     std::vector<Rule> rules;
     /// `default_reactions()` (off) when the config has no `[reactions]` table.
@@ -89,10 +73,6 @@ Config embedded_default();
 
 /// `$XDG_CONFIG_HOME/omen-kbd/config.toml` (default `~/.config/omen-kbd/config.toml`).
 std::filesystem::path config_path();
-
-/// Normalizes a modifier set like "Shift+SUPER" to "super+shift": case-insensitive,
-/// `+`-separated, deduplicated, ordered super, ctrl, alt, shift.
-std::expected<std::string, std::string> normalize_mods(std::string_view s);
 
 /// Expands a leading `~` to $HOME.
 std::filesystem::path expand_home(std::string_view p);

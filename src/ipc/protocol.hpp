@@ -27,13 +27,13 @@ namespace req {
 struct Status {
     friend bool operator==(const Status &, const Status &) = default;
 };
+/// The one lighting request. `look` is a profile name, or 1 or 4 `#RRGGBB` colors (left, middle,
+/// right, wasd); empty keeps the current colors. `effect` and `speed` then choose the effect.
 struct Set {
-    std::vector<std::string> colors;
+    std::vector<std::string> look;
+    std::optional<std::string> effect;
+    std::optional<std::uint8_t> speed;
     friend bool operator==(const Set &, const Set &) = default;
-};
-struct Profile {
-    std::string select;
-    friend bool operator==(const Profile &, const Profile &) = default;
 };
 struct Brightness {
     std::string value;
@@ -43,15 +43,6 @@ enum class PowerAction { On, Off, Toggle };
 struct Power {
     PowerAction action;
     friend bool operator==(const Power &, const Power &) = default;
-};
-struct Effect {
-    std::string name;
-    std::optional<std::uint8_t> speed;
-    friend bool operator==(const Effect &, const Effect &) = default;
-};
-struct Hint {
-    std::string mods;
-    friend bool operator==(const Hint &, const Hint &) = default;
 };
 struct Idle {
     bool on;
@@ -64,9 +55,6 @@ struct Flag {
 };
 struct Reload {
     friend bool operator==(const Reload &, const Reload &) = default;
-};
-struct Subscribe {
-    friend bool operator==(const Subscribe &, const Subscribe &) = default;
 };
 /// A desktop notification arrived (from the swaync script). `urgency` is as the sender spelled it:
 /// `to_signal` accepts any case.
@@ -88,11 +76,10 @@ struct Agent {
 };
 } // namespace req
 
-using Request = std::variant<req::Status, req::Set, req::Profile, req::Brightness, req::Power,
-                             req::Effect, req::Hint, req::Idle, req::Flag, req::Reload,
-                             req::Subscribe, req::Notify, req::Agent>;
+using Request = std::variant<req::Status, req::Set, req::Brightness, req::Power, req::Idle,
+                             req::Flag, req::Reload, req::Notify, req::Agent>;
 
-/// What `status`, Waybar and `doctor` see. `zones` are logical-order `RRGGBB` after compositing.
+/// What `status` and `doctor` see. `zones` are logical-order `RRGGBB` after compositing.
 struct Status {
     std::string profile;
     std::string effect;
@@ -102,7 +89,6 @@ struct Status {
     bool on = false;
     bool backlight = false;
     std::array<std::string, 4> zones;
-    std::optional<std::string> hint;
     std::vector<std::string> active_rules;
     Facts facts;
     std::string backend;

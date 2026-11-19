@@ -45,7 +45,8 @@ void write_all(int fd, std::string_view s) {
 } // namespace
 
 TEST(Ipc, RequestWireFormat) {
-    EXPECT_EQ(encode(Request{req::Set{{"#ff0000"}}}), R"({"cmd":"set","colors":["#ff0000"]})");
+    EXPECT_EQ(encode(Request{req::Set{{"#ff0000"}, "glow", std::uint8_t{80}}}),
+              R"({"cmd":"set","look":["#ff0000"],"effect":"glow","speed":80})");
     EXPECT_EQ(encode(Request{req::Power{req::PowerAction::Toggle}}),
               R"({"cmd":"power","action":"toggle"})");
     EXPECT_EQ(encode(Request{req::Status{}}), R"({"cmd":"status"})");
@@ -54,18 +55,15 @@ TEST(Ipc, RequestWireFormat) {
 TEST(Ipc, EveryRequestRoundtrips) {
     const std::vector<Request> all{
         req::Status{},
-        req::Set{{"#ff0000", "theme:blue", "#00ff00", "#0000ff"}},
-        req::Profile{"next"},
+        req::Set{{"#ff0000", "#0000ff", "#00ff00", "#0000ff"}, std::nullopt, std::nullopt},
+        req::Set{{"game"}, "drift", std::nullopt},
+        req::Set{{}, std::nullopt, std::uint8_t{30}},
         req::Brightness{"-10"},
         req::Power{req::PowerAction::On},
         req::Power{req::PowerAction::Off},
-        req::Effect{"glow", std::uint8_t{80}},
-        req::Effect{"static", std::nullopt},
-        req::Hint{"super+shift"},
         req::Idle{true},
         req::Flag{"gamemode", false},
         req::Reload{},
-        req::Subscribe{},
         req::Notify{"ZapZap", "com.rtosta.zapzap", "critical"},
         req::Notify{"", "", "normal"},
         req::Agent{"waiting", "s1", "0xabc", "claude"},
@@ -76,8 +74,8 @@ TEST(Ipc, EveryRequestRoundtrips) {
         ASSERT_TRUE(back.has_value()) << encode(r) << " -> " << back.error();
         EXPECT_EQ(*back, r) << encode(r);
     }
-    EXPECT_TRUE(decode_request(R"({"cmd":"effect","name":"glow"})").has_value())
-        << "speed may be omitted";
+    EXPECT_TRUE(decode_request(R"({"cmd":"set","look":["game"]})").has_value())
+        << "effect and speed may be omitted";
 }
 
 TEST(Ipc, NotifyRoundTripsWithKebabCaseKeys) {
@@ -293,9 +291,8 @@ TEST(Ipc, ToSignalRejectsEmptyAndOverlongSessionIds) {
 
 TEST(Ipc, ToSignalIsNulloptForRequestsThatAreNotSignals) {
     EXPECT_FALSE(to_signal(req::Status{}).has_value());
-    EXPECT_FALSE(to_signal(req::Subscribe{}).has_value());
     EXPECT_FALSE(to_signal(req::Reload{}).has_value());
-    EXPECT_FALSE(to_signal(req::Hint{"super"}).has_value());
+    EXPECT_FALSE(to_signal(req::Reload{}).has_value());
     EXPECT_FALSE(to_signal(req::Power{req::PowerAction::Toggle}).has_value());
 }
 
@@ -309,7 +306,6 @@ TEST(Ipc, StatusResponseRoundtrips) {
     s.on = true;
     s.backlight = true;
     s.zones = {"FF0000", "00FF00", "0000FF", "FFFFFF"};
-    s.hint = "super";
     s.active_rules = {"gamemode"};
     s.facts.power_profile = "balanced";
     s.facts.on_battery = false;
@@ -404,7 +400,8 @@ TEST(Ipc, EncodingReplacesInvalidUtf8) {
     const auto err = decode_response(encode(Response::failure(bad)));
     ASSERT_TRUE(err.has_value()) << err.error();
     EXPECT_EQ(err->error, replaced);
-    EXPECT_EQ(decode_request(encode(Request{req::Profile{bad}})), Request{req::Profile{replaced}});
+    EXPECT_EQ(decode_request(encode(Request{req::Set{{bad}, std::nullopt, std::nullopt}})),
+              (Request{req::Set{{replaced}, std::nullopt, std::nullopt}}));
     Status s;
     s.warnings = {bad};
     const auto ok = decode_response(encode(Response::success(s)));
@@ -483,28 +480,6 @@ TEST(Ipc, ReadRequestRejectsGarbage) {
     EXPECT_EQ(b.next_line(), R"({"cmd":"status"})");
     EXPECT_EQ(b.next_line(), R"({"cmd":"reload"})");
     EXPECT_EQ(b.next_line(), std::nullopt);
-}
-
-TEST(Ipc, SubscriptionYieldsStatusesUntilClose) {
-    TempDir d;
-    const auto p = d.path() / "s.sock";
-    auto l = bind_socket(p);
-    ASSERT_TRUE(l.has_value());
-    std::thread server([&] {
-        UniqueFd c = accept_one(l->get());
-        EXPECT_EQ(decode_request(read_line(c.get())).value(), Request{req::Subscribe{}});
-        for (std::uint8_t b : {std::uint8_t{10}, std::uint8_t{20}}) {
-            Status s;
-            s.brightness = b;
-            write_all(c.get(), encode(Response::success(s)) + "\n");
-        }
-    });
-    auto sub = subscribe(p);
-    ASSERT_TRUE(sub.has_value()) << sub.error().message();
-    EXPECT_EQ(sub->next_status().value()->brightness, 10);
-    EXPECT_EQ(sub->next_status().value()->brightness, 20);
-    server.join();
-    EXPECT_EQ(sub->next_status().value(), std::nullopt) << "server closed";
 }
 
 TEST(Ipc, RequestWithoutDaemonIsNotRunning) {
