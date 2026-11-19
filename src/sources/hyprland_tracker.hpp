@@ -1,6 +1,6 @@
 #pragma once
 // Turns Hyprland's parsed events into what the daemon understands: signals for reactions, the
-// fullscreen fact, the submap, and a request to look at fullscreen again. Pure: no clock, no I/O,
+// fullscreen fact, and a request to look at fullscreen again. Pure: no clock, no I/O,
 // no window title (the parser already dropped them).
 
 #include "core/signals.hpp"
@@ -21,7 +21,7 @@ struct CheckFullscreen {
     friend bool operator==(const CheckFullscreen &, const CheckFullscreen &) = default;
 };
 
-using TrackerOut = std::variant<Signal, FactUpdate, event::Submap, CheckFullscreen>;
+using TrackerOut = std::variant<Signal, FactUpdate, CheckFullscreen>;
 
 /// Remembers what the events so far imply (current workspace, focused window, urgent windows) and
 /// says what each new event means. `Connected` and `Disconnected` forget all of it: events from a
@@ -39,7 +39,6 @@ class HyprlandTracker {
   private:
     using Out = std::vector<TrackerOut>;
 
-    Out handle(const hypr::Submap &ev);
     Out handle(const hypr::WorkspaceV2 &ev);
     Out handle(const hypr::OpenWindow &ev);
     Out handle(const hypr::CloseWindow &ev);

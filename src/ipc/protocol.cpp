@@ -101,7 +101,6 @@ ojson status_json(const Status &s) {
                  {"on", s.on},
                  {"backlight", s.backlight},
                  {"zones", s.zones},
-                 {"hint", opt_json(s.hint)},
                  {"active_rules", s.active_rules},
                  {"facts", facts_json(s.facts)},
                  {"backend", s.backend},
@@ -122,7 +121,6 @@ Status status_from(const ojson &j) {
     s.on = j.at("on").get<bool>();
     s.backlight = j.at("backlight").get<bool>();
     s.zones = j.at("zones").get<std::array<std::string, 4>>();
-    s.hint = opt_get<std::string>(j, "hint");
     s.active_rules = j.at("active_rules").get<std::vector<std::string>>();
     s.facts = facts_from(j.at("facts"));
     s.backend = j.at("backend").get<std::string>();
@@ -142,10 +140,8 @@ Request request_from(const ojson &j) {
         return req::Status{};
     }
     if (cmd == "set") {
-        return req::Set{j.at("colors").get<std::vector<std::string>>()};
-    }
-    if (cmd == "profile") {
-        return req::Profile{j.at("select").get<std::string>()};
+        return req::Set{j.at("look").get<std::vector<std::string>>(),
+                        opt_get<std::string>(j, "effect"), opt_get<std::uint8_t>(j, "speed")};
     }
     if (cmd == "brightness") {
         return req::Brightness{j.at("value").get<std::string>()};
@@ -163,12 +159,6 @@ Request request_from(const ojson &j) {
         }
         throw std::invalid_argument(std::format("unknown power action \"{}\"", a));
     }
-    if (cmd == "effect") {
-        return req::Effect{j.at("name").get<std::string>(), opt_get<std::uint8_t>(j, "speed")};
-    }
-    if (cmd == "hint") {
-        return req::Hint{j.at("mods").get<std::string>()};
-    }
     if (cmd == "idle") {
         return req::Idle{j.at("on").get<bool>()};
     }
@@ -177,9 +167,6 @@ Request request_from(const ojson &j) {
     }
     if (cmd == "reload") {
         return req::Reload{};
-    }
-    if (cmd == "subscribe") {
-        return req::Subscribe{};
     }
     if (cmd == "notify") {
         return req::Notify{j.at("app").get<std::string>(), j.at("desktop-entry").get<std::string>(),
@@ -197,9 +184,11 @@ Request request_from(const ojson &j) {
 std::string encode(const Request &r) {
     struct Visitor {
         ojson operator()(const req::Status &) const { return {{"cmd", "status"}}; }
-        ojson operator()(const req::Set &v) const { return {{"cmd", "set"}, {"colors", v.colors}}; }
-        ojson operator()(const req::Profile &v) const {
-            return {{"cmd", "profile"}, {"select", v.select}};
+        ojson operator()(const req::Set &v) const {
+            return {{"cmd", "set"},
+                    {"look", v.look},
+                    {"effect", opt_json(v.effect)},
+                    {"speed", opt_json(v.speed)}};
         }
         ojson operator()(const req::Brightness &v) const {
             return {{"cmd", "brightness"}, {"value", v.value}};
@@ -207,16 +196,11 @@ std::string encode(const Request &r) {
         ojson operator()(const req::Power &v) const {
             return {{"cmd", "power"}, {"action", power_name(v.action)}};
         }
-        ojson operator()(const req::Effect &v) const {
-            return {{"cmd", "effect"}, {"name", v.name}, {"speed", opt_json(v.speed)}};
-        }
-        ojson operator()(const req::Hint &v) const { return {{"cmd", "hint"}, {"mods", v.mods}}; }
         ojson operator()(const req::Idle &v) const { return {{"cmd", "idle"}, {"on", v.on}}; }
         ojson operator()(const req::Flag &v) const {
             return {{"cmd", "flag"}, {"name", v.name}, {"on", v.on}};
         }
         ojson operator()(const req::Reload &) const { return {{"cmd", "reload"}}; }
-        ojson operator()(const req::Subscribe &) const { return {{"cmd", "subscribe"}}; }
         ojson operator()(const req::Notify &v) const {
             return {{"cmd", "notify"},
                     {"app", v.app},

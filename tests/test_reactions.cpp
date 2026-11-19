@@ -1,6 +1,5 @@
 #include "daemon/reactions.hpp"
 
-#include "core/palette.hpp"
 #include "sources/hyprland_tracker.hpp"
 
 #include <chrono>
@@ -34,29 +33,23 @@ constexpr Visibility kDark{false, true};
 
 const TimePoint t0 = Clock::now();
 
-/// Maps hex references to themselves and theme references through `css` (waybar color lines).
-Resolver resolver(std::string_view css = {}) {
-    const Palette palette = Palette::from_waybar_css(css);
-    return [palette](const ColorRef &c) { return c.resolve(palette, ThemeColors::Exact).value(); };
-}
-
 /// Enabled, with the spec's timings (120 ms steps, 150 ms blinks, the attention light on Right, the
 /// Claude lamp on WASD for an hour) and a distinct color for each reaction.
 ReactionsCfg make_cfg() {
     ReactionsCfg cfg;
     cfg.enabled = true;
-    cfg.workspace.color = ColorRef::hex(kSweep);
-    cfg.notify.color = ColorRef::hex(kNote);
-    cfg.notify.critical = ColorRef::hex(kCritical);
-    cfg.urgent.color = ColorRef::hex(kUrgent);
-    cfg.agent.waiting = ColorRef::hex(kWaiting);
-    cfg.agent.done = ColorRef::hex(kDone);
+    cfg.workspace.color = kSweep;
+    cfg.notify.color = kNote;
+    cfg.notify.critical = kCritical;
+    cfg.urgent.color = kUrgent;
+    cfg.agent.waiting = kWaiting;
+    cfg.agent.done = kDone;
     return cfg;
 }
 
 Reactions started(const ReactionsCfg &cfg = make_cfg()) {
     Reactions r;
-    r.reconfigure(cfg, resolver());
+    r.reconfigure(cfg);
     return r;
 }
 
@@ -89,7 +82,7 @@ TEST(Reactions, DisabledDoesNothing) {
     off_cfg.enabled = false;
     Reactions never_configured;
     Reactions configured_off;
-    configured_off.reconfigure(off_cfg, resolver());
+    configured_off.reconfigure(off_cfg);
 
     for (Reactions *r : {&never_configured, &configured_off}) {
         const std::vector<Signal> all{
@@ -113,7 +106,7 @@ TEST(Reactions, DisabledDoesNothing) {
     }
 
     // Nothing was kept for later: switching it on starts from a blank slate.
-    configured_off.reconfigure(make_cfg(), resolver());
+    configured_off.reconfigure(make_cfg());
     configured_off.update(t0 + 20ms, kShown);
     EXPECT_TRUE(empty(configured_off.layers(t0 + 20ms).lamps));
     EXPECT_TRUE(empty(configured_off.layers(t0 + 20ms).transient));
@@ -284,8 +277,8 @@ TEST(Reactions, ReconfigureToDisabledForgetsTheFocus) {
     r.on_signal(signal::FocusChanged{"w1", "com.rtosta.zapzap"}, t0, kShown);
     ReactionsCfg off = make_cfg();
     off.enabled = false;
-    r.reconfigure(off, resolver());
-    r.reconfigure(make_cfg(), resolver());
+    r.reconfigure(off);
+    r.reconfigure(make_cfg());
 
     // The focus from before the gap is stale: it must not suppress the lamp or the flash.
     r.on_signal(signal::AgentWaiting{"s1", "w1"}, t0 + 1s, kShown);
@@ -437,10 +430,10 @@ TEST(Reactions, ReconfigureKeepsLampKeysAndLetsAPlayingClipFinish) {
     constexpr Rgb kWaiting2{4, 5, 6};
     ReactionsCfg cfg2 = make_cfg();
     cfg2.step_ms = 200;
-    cfg2.workspace.color = ColorRef::hex(kSweep2);
-    cfg2.agent.waiting = ColorRef::hex(kWaiting2);
+    cfg2.workspace.color = kSweep2;
+    cfg2.agent.waiting = kWaiting2;
     cfg2.agent.ttl_s = 60;
-    r.reconfigure(cfg2, resolver());
+    r.reconfigure(cfg2);
 
     // The key stays and the lamp takes the new look at once.
     EXPECT_EQ(r.status().lamps, names({"agent"}));
@@ -471,7 +464,7 @@ TEST(Reactions, ReconfigureAppliesTheNewRateLimit) {
     Reactions r = started();
     ReactionsCfg cfg = make_cfg();
     cfg.max_per_minute = 1;
-    r.reconfigure(cfg, resolver());
+    r.reconfigure(cfg);
 
     r.on_signal(signal::WorkspaceSwitched{1, 2}, t0, kShown);
     EXPECT_FALSE(empty(r.layers(t0).transient));
@@ -493,41 +486,18 @@ TEST(Reactions, ReconfigureToDisabledClearsLampsAndClips) {
 
     ReactionsCfg off = make_cfg();
     off.enabled = false;
-    r.reconfigure(off, resolver());
+    r.reconfigure(off);
     EXPECT_TRUE(empty(r.layers(t0 + 10ms).lamps));
     EXPECT_TRUE(empty(r.layers(t0 + 10ms).transient));
     EXPECT_FALSE(r.next_change().has_value());
     EXPECT_EQ(r.status(), ReactionsStatus{});
 
     // Turning it back on does not bring anything back.
-    r.reconfigure(make_cfg(), resolver());
+    r.reconfigure(make_cfg());
     r.update(t0 + 20ms, kShown);
     EXPECT_TRUE(empty(r.layers(t0 + 20ms).lamps));
     EXPECT_TRUE(empty(r.layers(t0 + 20ms).transient));
     EXPECT_EQ(r.status(), (ReactionsStatus{true, {}, std::nullopt}));
-}
-
-TEST(Reactions, RestyleChangesTheLampColorWithoutLosingKeys) {
-    constexpr Rgb kAlertA{0x0a, 0xa0, 0x5a};
-    constexpr Rgb kAlertB{0xc0, 0x30, 0x70};
-    constexpr Rgb kSweepB{0x30, 0x40, 0x50};
-    ReactionsCfg cfg = make_cfg();
-    cfg.agent.waiting = ColorRef::theme("alert");
-    cfg.workspace.color = ColorRef::theme("sweep");
-    Reactions r;
-    r.reconfigure(cfg, resolver("@define-color alert #0aa05a;\n@define-color sweep #0a141e;\n"));
-
-    r.on_signal(signal::AgentWaiting{"s1", "w1"}, t0, kShown);
-    EXPECT_EQ(r.layers(t0).lamps, lit(kAlertA, {Zone::Wasd}));
-
-    r.restyle(resolver("@define-color alert #c03070;\n@define-color sweep #304050;\n"));
-    EXPECT_EQ(r.status().lamps, names({"agent"}));
-    EXPECT_EQ(r.layers(t0).lamps, lit(kAlertB, {Zone::Wasd}));
-    EXPECT_TRUE(empty(r.layers(t0 + 150ms).lamps)); // the intro goes on where it was
-    EXPECT_EQ(r.layers(t0 + 300ms).lamps, lit(kAlertB, {Zone::Wasd}));
-
-    r.on_signal(signal::WorkspaceSwitched{1, 2}, t0 + 1s, kShown);
-    EXPECT_EQ(r.layers(t0 + 1s).transient, lit(kSweepB, {Zone::Left, Zone::Wasd}));
 }
 
 TEST(Reactions, LampsAreHiddenWhileTheKeyboardIsNotVisible) {

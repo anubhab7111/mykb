@@ -1,5 +1,5 @@
-// Event sources in real time: Hyprland socket2 (fake listener), theme symlink watcher (temp
-// tree), hwmon (fake sysfs), system D-Bus (a private dbus-daemon with a fake logind).
+// Event sources in real time: Hyprland socket2 (fake listener),
+// hwmon (fake sysfs), system D-Bus (a private dbus-daemon with a fake logind).
 
 #include "fake_hyprland.hpp"
 #include "helpers.hpp"
@@ -9,7 +9,6 @@
 #include "sources/hyprland.hpp"
 #include "sources/hyprland_bridge.hpp"
 #include "sources/system_dbus.hpp"
-#include "sources/theme.hpp"
 
 #include <sdbus-c++/sdbus-c++.h>
 
@@ -99,23 +98,6 @@ UniqueFd accept_within(int listen_fd, std::chrono::milliseconds timeout) {
     return UniqueFd(::accept4(listen_fd, nullptr, nullptr, SOCK_CLOEXEC));
 }
 
-/// themes/a, themes/b, state/current → ../themes/a, cfg/current → ../state/current
-void make_rice_layout(const fs::path &root) {
-    fs::create_directories(root / "themes/a");
-    fs::create_directories(root / "themes/b");
-    fs::create_directories(root / "state");
-    fs::create_directories(root / "cfg");
-    fs::create_symlink("../themes/a", root / "state/current");
-    fs::create_symlink("../state/current", root / "cfg/current");
-}
-
-/// Atomically points `link` at `target` (what `ln -sfn` + rename does).
-void swap_link(const fs::path &link, const fs::path &target) {
-    const fs::path tmp = link.string() + ".new";
-    fs::create_symlink(target, tmp);
-    fs::rename(tmp, link);
-}
-
 /// A private dbus-daemon listening in `dir`, stopped by stop() or the destructor. Not ok() when
 /// dbus-daemon is not installed or does not come up.
 class PrivateBus {
@@ -184,9 +166,9 @@ std::vector<event::Sleep> sleeps(const Events &events) {
 
 } // namespace
 
-TEST(Hyprland, ParseSubmapLines) {
-    EXPECT_EQ(parse_socket2_line("submap>>resize"), HyprEvent{hypr::Submap{"resize"}});
-    EXPECT_EQ(parse_socket2_line("submap>>"), HyprEvent{hypr::Submap{std::nullopt}});
+TEST(Hyprland, ParseWorkspaceAndActiveWindowLines) {
+    EXPECT_EQ(parse_socket2_line("workspacev2>>2,two"), HyprEvent{hypr::WorkspaceV2{2}});
+    EXPECT_EQ(parse_socket2_line("submap>>resize"), std::nullopt) << "submaps are not used";
     EXPECT_EQ(parse_socket2_line("activewindow>>kitty,~"), HyprEvent{hypr::ActiveWindow{"kitty"}});
     EXPECT_EQ(parse_socket2_line("windowtitle>>kitty,~"), std::nullopt);
     EXPECT_EQ(parse_socket2_line("submapx>>resize"), std::nullopt);
@@ -207,7 +189,7 @@ TEST(Hyprland, Socket2ConnectAndDisconnectAreEventsAndItReconnects) {
 
     UniqueFd first = accept_within(listener->get(), 2000ms);
     ASSERT_TRUE(first) << "connects at start";
-    const std::string lines = "activewindow>>kitty,~\nsubmap>>resize\n";
+    const std::string lines = "activewindow>>kitty,~\nworkspacev2>>2,two\n";
     ASSERT_EQ(::write(first.get(), lines.data(), lines.size()), static_cast<ssize_t>(lines.size()));
     ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
     first.reset(); // Hyprland goes away
@@ -220,7 +202,7 @@ TEST(Hyprland, Socket2ConnectAndDisconnectAreEventsAndItReconnects) {
     EXPECT_GE(Clock::now() - dropped, 800ms) << "after the 1 s backoff, not in a loop";
     ASSERT_TRUE(wait_until([&] { return events.size() >= 5; }, 2000ms));
     EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::ActiveWindow{"kitty"},
-                                                    hypr::Submap{"resize"}, hypr::Disconnected{},
+                                                    hypr::WorkspaceV2{2}, hypr::Disconnected{},
                                                     hypr::Connected{}}));
     EXPECT_EQ(src.connected_path(), path);
 }
@@ -253,10 +235,10 @@ TEST(Hyprland, TriesEachSocket2CandidateUntilOneAccepts) {
 
     UniqueFd conn = accept_within(listener->get(), 2000ms);
     ASSERT_TRUE(conn) << "connects to the live candidate at start";
-    const std::string line = "submap>>resize\n";
+    const std::string line = "workspacev2>>2,two\n";
     ASSERT_EQ(::write(conn.get(), line.data(), line.size()), static_cast<ssize_t>(line.size()));
     ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
-    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::Submap{"resize"}}));
+    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::WorkspaceV2{2}}));
 }
 
 // T14-2 and F4: past 64 KiB without a newline the buffer is dropped, and so is the rest of that
@@ -284,11 +266,11 @@ TEST(Hyprland, TheTailOfAnOversizedLineIsNotALine) {
     }
     std::this_thread::sleep_for(200ms); // the reader drains it and starts discarding
 
-    const std::string lines = "urgent>>abc\nsubmap>>resize\n";
+    const std::string lines = "urgent>>abc\nworkspacev2>>2,two\n";
     ASSERT_EQ(::write(conn.get(), lines.data(), lines.size()), static_cast<ssize_t>(lines.size()));
     ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
     std::this_thread::sleep_for(50ms);
-    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::Submap{"resize"}}))
+    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::WorkspaceV2{2}}))
         << "only the line after the oversized one is an event";
 }
 
@@ -306,7 +288,7 @@ TEST(Hyprland, ALineOfExactly64KiBIsStillAnEvent) {
     UniqueFd conn = accept_within(listener->get(), 2000ms);
     ASSERT_TRUE(conn);
 
-    const std::string prefix = "submap>>";
+    const std::string prefix = "activewindow>>";
     const std::string name(std::size_t{64} * 1024 - prefix.size(), 'n');
     const std::string line = prefix + name;
     std::string_view rest = line;
@@ -316,11 +298,11 @@ TEST(Hyprland, ALineOfExactly64KiBIsStillAnEvent) {
         rest.remove_prefix(static_cast<std::size_t>(n));
     }
     std::this_thread::sleep_for(200ms);
-    const std::string more = "\nsubmap>>resize\n";
+    const std::string more = "\nworkspacev2>>2,two\n";
     ASSERT_EQ(::write(conn.get(), more.data(), more.size()), static_cast<ssize_t>(more.size()));
     ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
-    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::Submap{name},
-                                                    hypr::Submap{"resize"}}));
+    EXPECT_EQ(events.get(), (std::vector<HyprEvent>{hypr::Connected{}, hypr::ActiveWindow{name},
+                                                    hypr::WorkspaceV2{2}}));
 }
 
 TEST(Hyprland, Socket2CandidatesPutTheSignatureFirstThenTheNewest) {
@@ -387,6 +369,17 @@ void configure_on_loop(EventLoop &loop, HyprlandBridge &bridge, bool reactions_o
     ASSERT_TRUE(wait_until([done] { return done->load(); }, 2000ms));
 }
 
+/// Waits until the loop thread has read everything sent so far. What was sent is already in the
+/// socket's buffer, so one posted task that runs after the read event of its own batch, and a
+/// second one after that, cannot overtake it.
+void settle(EventLoop &loop) {
+    for (int i = 0; i < 2; ++i) {
+        auto done = std::make_shared<std::atomic<bool>>(false);
+        loop.post([done] { *done = true; });
+        ASSERT_TRUE(wait_until([done] { return done->load(); }, 2000ms));
+    }
+}
+
 template <class S> Event sig(S s) { return Event{Signal{std::move(s)}}; }
 
 Event fullscreen_cleared() { return Event{FactUpdate{fact::FullscreenApp{std::nullopt}}}; }
@@ -429,23 +422,22 @@ TEST(HyprlandBridge, ForwardsSignalsOnlyWhileReactionsAreOn) {
     UniqueFd conn = accept_within(hypr_sock.listener->get(), 2000ms);
     ASSERT_TRUE(conn);
 
-    // Off until configured: the pulse is dropped, the submap passes.
-    send(conn, "openwindow>>abc,1,Alacritty,t\nsubmap>>resize\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
-    EXPECT_EQ(events.get(), (std::vector<Event>{event::Submap{"resize"}}));
+    // Off until configured: the pulse is dropped.
+    send(conn, "openwindow>>abc,1,Alacritty,t\n");
+    settle(loop);
+    EXPECT_EQ(events.size(), 0u);
 
     configure_on_loop(loop, bridge, true, false);
     send(conn, "openwindow>>abc,1,Alacritty,t\nurgent>>def\nclosewindow>>abc\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
     EXPECT_EQ(events.get(),
-              (std::vector<Event>{event::Submap{"resize"}, sig(signal::WindowOpened{}),
-                                  sig(signal::UrgentRaised{"def"}), sig(signal::WindowClosed{})}));
+              (std::vector<Event>{sig(signal::WindowOpened{}), sig(signal::UrgentRaised{"def"}),
+                                  sig(signal::WindowClosed{})}));
 
     configure_on_loop(loop, bridge, false, false);
-    send(conn, "closewindow>>def\nsubmap>>\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 5; }, 2000ms));
-    EXPECT_EQ(events.get().back(), Event{event::Submap{std::nullopt}});
-    EXPECT_EQ(events.size(), 5u) << "no WindowClosed or UrgentCleared while reactions are off";
+    send(conn, "closewindow>>def\n");
+    settle(loop);
+    EXPECT_EQ(events.size(), 3u) << "no WindowClosed or UrgentCleared while reactions are off";
 }
 
 // The real order of a focus change is activewindow, activewindowv2, windowtitle, windowtitlev2; a
@@ -476,7 +468,7 @@ TEST(HyprlandBridge, ARealFocusSequenceBecomesOneSignalPerChange) {
     EXPECT_EQ(events.size(), 3u) << "nothing more arrives";
 }
 
-TEST(HyprlandBridge, SubmapAndDisconnectBehaveAsBefore) {
+TEST(HyprlandBridge, ADisconnectClearsTheFullscreenFactAndItReconnects) {
     FakeHyprland hypr_sock;
     ASSERT_TRUE(hypr_sock.listener.has_value()) << hypr_sock.listener.error().message();
     EventLoop loop;
@@ -486,22 +478,17 @@ TEST(HyprlandBridge, SubmapAndDisconnectBehaveAsBefore) {
 
     UniqueFd first = accept_within(hypr_sock.listener->get(), 2000ms);
     ASSERT_TRUE(first) << "connects at start";
-    send(first, "activewindow>>kitty,~\nsubmap>>resize\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    send(first, "activewindow>>kitty,~\n");
     first.reset(); // Hyprland goes away
     const auto dropped = Clock::now();
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
-    // No submap color sticks, and the fullscreen fact is cleared. UrgentReset is a signal, so it
-    // stays out while reactions are off.
-    EXPECT_EQ(events.get(), (std::vector<Event>{event::Submap{"resize"}, fullscreen_cleared(),
-                                                event::Submap{std::nullopt}}));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    // The fullscreen fact is cleared. UrgentReset is a signal, so it stays out while reactions are
+    // off.
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_cleared()}));
 
     UniqueFd second = accept_within(hypr_sock.listener->get(), 3000ms);
     ASSERT_TRUE(second) << "reconnects within 3 s";
     EXPECT_GE(Clock::now() - dropped, 800ms) << "after the 1 s backoff, not in a loop";
-    send(second, "submap>>game\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
-    EXPECT_EQ(events.get().back(), Event{event::Submap{"game"}});
 }
 
 // Review focus 5: a lamp must not stay lit when Hyprland goes away.
@@ -519,11 +506,10 @@ TEST(HyprlandBridge, DisconnectResetsUrgentWhileReactionsAreOn) {
     send(first, "urgent>>abc\n");
     ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
     first.reset();
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 5; }, 2000ms));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
     EXPECT_EQ(events.get(),
               (std::vector<Event>{sig(signal::UrgentRaised{"abc"}), sig(signal::UrgentReset{}),
-                                  fullscreen_cleared(), event::Submap{std::nullopt},
-                                  sig(signal::FocusChanged{"", ""})}))
+                                  fullscreen_cleared(), sig(signal::FocusChanged{"", ""})}))
         << "T14-4: the stale focus and class are cleared too";
 }
 
@@ -542,44 +528,40 @@ TEST(HyprlandBridge, TurningReactionsOnReplaysTheHeldFocusAndUrgentWindows) {
     ASSERT_TRUE(conn);
 
     // Reactions are off: the tracker learns the focus and an urgent window, the daemon hears
-    // nothing of it. The submap passes, and (lines are handled in order) marks the end.
-    send(conn, "activewindow>>kitty,Title\nactivewindowv2>>a1\nurgent>>b2\nsubmap>>resize\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
-    EXPECT_EQ(events.get(), (std::vector<Event>{event::Submap{"resize"}}))
-        << "no signal while reactions are off";
+    // nothing of it.
+    send(conn, "activewindow>>kitty,Title\nactivewindowv2>>a1\nurgent>>b2\n");
+    settle(loop);
+    EXPECT_EQ(events.size(), 0u) << "no signal while reactions are off";
 
     // Off -> on: the held focus and urgent window are replayed, the focus first.
     configure_on_loop(loop, bridge, true, false);
-    EXPECT_EQ(events.get(),
-              (std::vector<Event>{event::Submap{"resize"}, sig(signal::FocusChanged{"a1", "kitty"}),
-                                  sig(signal::UrgentRaised{"b2"})}));
+    EXPECT_EQ(events.get(), (std::vector<Event>{sig(signal::FocusChanged{"a1", "kitty"}),
+                                                sig(signal::UrgentRaised{"b2"})}));
 
     // A reload that leaves reactions on says nothing again.
     configure_on_loop(loop, bridge, true, false);
-    EXPECT_EQ(events.size(), 3u) << "only the change from off to on replays";
+    EXPECT_EQ(events.size(), 2u) << "only the change from off to on replays";
 
     // Turning off says nothing either. The tracker keeps following Hyprland meanwhile.
     configure_on_loop(loop, bridge, false, false);
-    EXPECT_EQ(events.size(), 3u);
-    send(conn, "urgent>>c3\nsubmap>>game\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
-    EXPECT_EQ(events.get().back(), Event{event::Submap{"game"}});
-    EXPECT_EQ(events.size(), 4u) << "no UrgentRaised while reactions are off";
+    EXPECT_EQ(events.size(), 2u);
+    send(conn, "urgent>>c3\n");
+    settle(loop);
+    EXPECT_EQ(events.size(), 2u) << "no UrgentRaised while reactions are off";
 
     // On again replays again, with what changed while it was off.
     configure_on_loop(loop, bridge, true, false);
-    EXPECT_EQ(events.get(), (std::vector<Event>{
-                                event::Submap{"resize"}, sig(signal::FocusChanged{"a1", "kitty"}),
-                                sig(signal::UrgentRaised{"b2"}), event::Submap{"game"},
-                                sig(signal::FocusChanged{"a1", "kitty"}),
-                                sig(signal::UrgentRaised{"b2"}), sig(signal::UrgentRaised{"c3"})}));
+    EXPECT_EQ(events.get(), (std::vector<Event>{sig(signal::FocusChanged{"a1", "kitty"}),
+                                                sig(signal::UrgentRaised{"b2"}),
+                                                sig(signal::FocusChanged{"a1", "kitty"}),
+                                                sig(signal::UrgentRaised{"b2"}),
+                                                sig(signal::UrgentRaised{"c3"})}));
 
     // The replay did not disturb the tracker: a repeat of the focused window (a title change) is
-    // still ignored (P15). The submap that follows marks the end of what the bridge delivered.
-    send(conn, "activewindow>>kitty,A new title\nactivewindowv2>>a1\nsubmap>>\n");
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 8; }, 2000ms));
-    EXPECT_EQ(events.get().back(), Event{event::Submap{std::nullopt}});
-    EXPECT_EQ(events.size(), 8u) << "no second FocusChanged for the same window";
+    // still ignored (P15).
+    send(conn, "activewindow>>kitty,A new title\nactivewindowv2>>a1\n");
+    settle(loop);
+    EXPECT_EQ(events.size(), 5u) << "no second FocusChanged for the same window";
 }
 
 // The fullscreen fact: socket2 says when to look, the request socket says what is there. The fact
@@ -717,13 +699,12 @@ TEST(HyprlandBridge, ConnectSeedsTheFullscreenState) {
     ASSERT_TRUE(requests.wait_for_requests(1));
 
     first.reset(); // Hyprland restarts, with mpv fullscreen when it comes back
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
     requests.reply_with(window_json("MPV", 2));
     UniqueFd second = accept_within(hypr_sock.listener->get(), 3000ms);
     ASSERT_TRUE(second) << "reconnects within 3 s";
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
-    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_cleared(), event::Submap{std::nullopt},
-                                                fullscreen_is("mpv")}));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_cleared(), fullscreen_is("mpv")}));
     EXPECT_EQ(requests.connections(), 2) << "Connected asks once";
 }
 
@@ -744,13 +725,12 @@ TEST(HyprlandBridge, AFullscreenAppStillFullscreenAfterARestartIsReportedAgain) 
     ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
 
     first.reset(); // Hyprland restarts; mpv is still fullscreen when it is back
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
     UniqueFd second = accept_within(hypr_sock.listener->get(), 3000ms);
     ASSERT_TRUE(second) << "reconnects within 3 s";
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 4; }, 2000ms));
-    EXPECT_EQ(events.get(),
-              (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared(),
-                                  event::Submap{std::nullopt}, fullscreen_is("mpv")}));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 3; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared(),
+                                                fullscreen_is("mpv")}));
 }
 
 // Ruling P21: the source connects inside the bridge's constructor, before the first `configure`,
@@ -856,12 +836,11 @@ TEST(HyprlandBridge, ADisconnectDropsAQueryInFlight) {
     ASSERT_TRUE(requests.wait_for_requests(1)) << "in flight";
 
     first.reset();
-    ASSERT_TRUE(wait_until([&] { return events.size() >= 2; }, 2000ms));
-    EXPECT_EQ(events.get(),
-              (std::vector<Event>{fullscreen_cleared(), event::Submap{std::nullopt}}));
+    ASSERT_TRUE(wait_until([&] { return events.size() >= 1; }, 2000ms));
+    EXPECT_EQ(events.get(), (std::vector<Event>{fullscreen_cleared()}));
     requests.answer_held(window_json("mpv", 2)); // from the Hyprland that is gone
     std::this_thread::sleep_for(300ms);          // less than the 1 s before it reconnects
-    EXPECT_EQ(events.size(), 2u) << "the cleared fact stays cleared";
+    EXPECT_EQ(events.size(), 1u) << "the cleared fact stays cleared";
 }
 
 namespace {
@@ -986,39 +965,10 @@ TEST(HyprlandBridge, ADisconnectCancelsAPendingRetry) {
     b.requests.reply_with(window_json("mpv", 2));
     std::this_thread::sleep_for(100ms); // the retry is pending
     b.conn.reset();                     // Hyprland goes away
-    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 3; }, 2000ms));
+    ASSERT_TRUE(wait_until([&] { return b.events.size() >= 2; }, 2000ms));
     std::this_thread::sleep_for(600ms); // past the retry, before the reconnect
     EXPECT_EQ(b.requests.connections(), 2);
-    EXPECT_EQ(b.events.get(), (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared(),
-                                                  event::Submap{std::nullopt}}));
-}
-
-TEST(Theme, LinkChainFollowsRiceLayout) {
-    TempDir d;
-    make_rice_layout(d.path());
-    EXPECT_EQ(link_chain(d.path() / "cfg/current"),
-              (std::vector<fs::path>{d.path() / "cfg/current", d.path() / "state/current",
-                                     d.path() / "themes/a"}));
-    EXPECT_EQ(link_chain(d.path() / "themes/b"), (std::vector<fs::path>{d.path() / "themes/b"}));
-}
-
-TEST(Theme, ThemeSwapEmitsEvent) {
-    TempDir d;
-    make_rice_layout(d.path());
-    EventLoop loop;
-    Events events;
-    ThemeWatcher watcher(loop, d.path() / "cfg/current", events.sink());
-    LoopThread running(loop);
-
-    swap_link(d.path() / "state/current", "../themes/b");
-    ASSERT_TRUE(wait_until([&] { return events.size() == 1; }, 1000ms)) << "theme swap seen";
-    EXPECT_EQ(events.get().front(), Event{event::ThemeChanged{}});
-
-    // The watches were rebuilt for the new chain: swapping back is seen too, once.
-    swap_link(d.path() / "state/current", "../themes/a");
-    EXPECT_TRUE(wait_until([&] { return events.size() == 2; }, 1000ms)) << "second swap seen";
-    std::this_thread::sleep_for(400ms);
-    EXPECT_EQ(events.size(), 2u) << "one event per swap (debounced)";
+    EXPECT_EQ(b.events.get(), (std::vector<Event>{fullscreen_is("mpv"), fullscreen_cleared()}));
 }
 
 TEST(Hwmon, FindsPackageTemp) {

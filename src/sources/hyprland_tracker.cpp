@@ -39,12 +39,6 @@ void HyprlandTracker::reset() {
     urgent_.clear();
 }
 
-HyprlandTracker::Out HyprlandTracker::handle(const hypr::Submap &ev) {
-    Out out;
-    out.emplace_back(event::Submap{ev.name});
-    return out;
-}
-
 HyprlandTracker::Out HyprlandTracker::handle(const hypr::WorkspaceV2 &ev) {
     Out out;
     if (ev.id <= 0) {
@@ -121,7 +115,6 @@ HyprlandTracker::Out HyprlandTracker::handle(const hypr::Disconnected & /*ev*/) 
     Out out;
     out.push_back(sig(signal::UrgentReset{}));
     out.emplace_back(FactUpdate{fact::FullscreenApp{std::nullopt}});
-    out.emplace_back(event::Submap{std::nullopt});
     // T14-4: whoever was told about the focus forgets it (and its class) now, not at the next
     // focus event. The tracker holds no focus, so `replay` says nothing about it.
     out.push_back(sig(signal::FocusChanged{"", ""}));

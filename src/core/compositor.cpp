@@ -8,12 +8,12 @@ Output compose(const Inputs &i, double t) {
 
     bool pulsing = false;
     if (i.overlay) {
-        if (const auto *tint = std::get_if<ResolvedTint>(&*i.overlay)) {
+        if (const auto *tint = std::get_if<TintOverlay>(&*i.overlay)) {
             for (Rgb &z : zones) {
                 z = Rgb::lerp(z, tint->color, tint->strength);
             }
         } else {
-            const auto &ov = std::get<ResolvedZones>(*i.overlay);
+            const auto &ov = std::get<ZonesOverlay>(*i.overlay);
             Rgb c = ov.color;
             if (ov.pulse && i.animate) {
                 pulsing = true;
@@ -26,16 +26,13 @@ Output compose(const Inputs &i, double t) {
     }
 
     zones = omenkbd::apply(zones, i.lamps);
-    if (i.hint) {
-        zones.fill(*i.hint);
-    }
     zones = omenkbd::apply(zones, i.transient);
 
     for (Rgb &z : zones) {
         z = z.scale(i.brightness);
     }
     const bool backlight = i.backlight && i.brightness > 0;
-    const bool animated = backlight && !i.hint && i.animate && (is_animated(i.effect) || pulsing);
+    const bool animated = backlight && i.animate && (is_animated(i.effect) || pulsing);
     return Output{backlight, zones, animated};
 }
 

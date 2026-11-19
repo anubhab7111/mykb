@@ -64,17 +64,17 @@ std::expected<void, std::string> read_bool(const toml::table &t, std::string_vie
 
 /// Reads the color `key` into `out` when present.
 std::expected<void, std::string> read_color(const toml::table &t, std::string_view key,
-                                            std::string_view where, ColorRef &out) {
+                                            std::string_view where, std::optional<Rgb> &out) {
     const auto s = opt<std::string>(t, key, where);
     if (!s) {
         return Err(s.error());
     }
     if (*s) {
-        auto c = ColorRef::parse(**s);
+        const auto c = Rgb::parse(**s);
         if (!c) {
             return Err(std::format("{}: `{}`: {}", where, key, c.error()));
         }
-        out = std::move(*c);
+        out = *c;
     }
     return {};
 }
@@ -162,10 +162,10 @@ std::string unquoted_dotted_key(const toml::key &key, const toml::node &node) {
 
 /// `[reactions.notify.apps]`: app name => color. Keys are lowercased, and two keys that collide
 /// after that are an error rather than a silent last-one-wins.
-std::expected<std::map<std::string, ColorRef, std::less<>>, std::string>
+std::expected<std::map<std::string, Rgb, std::less<>>, std::string>
 parse_apps(const toml::table &t) {
     constexpr std::string_view where = "reactions.notify.apps";
-    std::map<std::string, ColorRef, std::less<>> apps;
+    std::map<std::string, Rgb, std::less<>> apps;
     for (const auto &[key, node] : t) {
         if (const std::string dotted = unquoted_dotted_key(key, node); !dotted.empty()) {
             return Err(std::format("{}: key `{}` contains dots and must be quoted: \"{}\" = ...",
@@ -175,11 +175,11 @@ parse_apps(const toml::table &t) {
         if (!s) {
             return Err(std::format("{}.{} must be a color string", where, key.str()));
         }
-        auto c = ColorRef::parse(*s);
+        const auto c = Rgb::parse(*s);
         if (!c) {
             return Err(std::format("{}.{}: {}", where, key.str(), c.error()));
         }
-        const auto [it, inserted] = apps.emplace(to_lower(key.str()), std::move(*c));
+        const auto [it, inserted] = apps.emplace(to_lower(key.str()), *c);
         if (!inserted) {
             return Err(std::format("{}: duplicate app `{}`", where, it->first));
         }
@@ -257,18 +257,7 @@ std::expected<void, std::string> with_section(const toml::table &t, std::string_
 
 } // namespace
 
-ReactionsCfg default_reactions() {
-    ReactionsCfg c;
-    c.workspace.color = ColorRef::theme("lavender");
-    c.notify.color = ColorRef::theme("blue");
-    c.notify.critical = ColorRef::theme("red");
-    c.notify.apps.emplace("zapzap", ColorRef::theme("green"));
-    c.notify.apps.emplace("discord", ColorRef::hex(Rgb{0x58, 0x65, 0xf2}));
-    c.urgent.color = ColorRef::theme("yellow");
-    c.agent.waiting = ColorRef::theme("peach");
-    c.agent.done = ColorRef::theme("green");
-    return c;
-}
+ReactionsCfg default_reactions() { return ReactionsCfg{}; }
 
 std::expected<ReactionsCfg, std::string> parse_reactions(const toml::table &t) {
     constexpr std::string_view where = "reactions";

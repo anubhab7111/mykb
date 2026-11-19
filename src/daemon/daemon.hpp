@@ -44,7 +44,7 @@ class Daemon {
     /// For extra watches (signalfd, event sources) before run().
     EventLoop &loop() { return loop_; }
     /// Called on the loop thread after a successful `reload` with the new config, so event
-    /// sources that depend on it (theme dir, hwmon) can be rebuilt.
+    /// sources that depend on it (hwmon) can be rebuilt.
     void on_config_replaced(std::function<void(const Config &)> fn) {
         on_config_replaced_ = std::move(fn);
     }
@@ -65,7 +65,6 @@ class Daemon {
         std::uint32_t events = 0;
         /// A request waits for the writer; later lines wait too, so replies stay in order.
         bool awaiting = false;
-        bool subscriber = false;
         /// The peer shut down its side for writing (it may still read the reply).
         bool eof = false;
         /// The peer is gone; nothing can be delivered.
@@ -108,7 +107,6 @@ class Daemon {
     [[nodiscard]] Status status() const {
         return model_.status(last_output_ ? &*last_output_ : nullptr);
     }
-    void broadcast();
     void schedule_save(Clock::duration within);
     void save();
 
@@ -145,7 +143,6 @@ class Daemon {
     bool force_next_ = false;
     bool force_backlight_next_ = false;
     std::optional<Output> last_output_;
-    std::optional<Status> last_status_;
     std::vector<Pending> pending_;
     std::vector<ProbeWaiter> awaiting_probe_;
     /// In arrival order, so the oldest deadline is the first; never longer than kMaxPendingSignals.
@@ -163,7 +160,7 @@ class Daemon {
     std::function<void(const Config &)> on_config_replaced_;
 };
 
-/// Loads config, palette and state, opens the backend, binds the socket, turns SIGTERM/SIGINT
+/// Loads config and state, opens the backend, binds the socket, turns SIGTERM/SIGINT
 /// into a clean stop, and runs. Returns the process exit code.
 int run_daemon(const RunOptions &opts);
 

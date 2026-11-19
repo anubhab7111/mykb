@@ -402,13 +402,13 @@ TEST(ReactionCosts, ReactionsAreSilentWhileLockedIdleOrOff) {
 
 TEST(ReactionCosts, FocusChangesOnAGlowAddNoWrites) {
     ReactionRig plain;
-    plain.request(req::Profile{"wavy"});
+    plain.request(req::Set{{"wavy"}, std::nullopt, std::nullopt});
     plain.run_for(1s);
     ASSERT_EQ(plain.writes(), 3u) << "the switch to `wavy` at 0, then a frame every 500 ms";
 
     // 20 focus changes 50 ms apart change nothing anyone sees, and add no write.
     ReactionRig focus;
-    focus.request(req::Profile{"wavy"});
+    focus.request(req::Set{{"wavy"}, std::nullopt, std::nullopt});
     for (int i = 0; i < 20; ++i) {
         focus.signal(signal::FocusChanged{str(i % 2 == 0 ? kTerm : kOther), "alacritty"});
         focus.run_for(50ms);
@@ -543,7 +543,7 @@ effect = "drift"
 // The slow glows change their frame twice a second, though the daemon ticks at 10 fps.
 TEST(ReactionCosts, ASlowGlowCostsAtMostTwoWritesASecond) {
     ReactionRig rig{glow_config()};
-    rig.request(req::Profile{"slow-drift"});
+    rig.request(req::Set{{"slow-drift"}, std::nullopt, std::nullopt});
     rig.run_for(10s);
     EXPECT_LE(rig.writes(), 21u) << "the switch, then one frame per half second";
     EXPECT_GE(rig.writes(), 18u) << "and the glow does move";
@@ -551,9 +551,9 @@ TEST(ReactionCosts, ASlowGlowCostsAtMostTwoWritesASecond) {
 
 TEST(ReactionCosts, AReactionOnASlowGlowCostsAtMostTwoMoreWrites) {
     ReactionRig plain{glow_config()};
-    plain.request(req::Profile{"slow-drift"});
+    plain.request(req::Set{{"slow-drift"}, std::nullopt, std::nullopt});
     ReactionRig pulsed{glow_config()};
-    pulsed.request(req::Profile{"slow-drift"});
+    pulsed.request(req::Set{{"slow-drift"}, std::nullopt, std::nullopt});
     pulsed.run_for(1s);
     plain.run_for(1s);
     pulsed.signal(signal::WindowOpened{});

@@ -102,7 +102,7 @@ class ReactionRig {
     /// writes the backlight (`force_backlight_next_` in `Daemon::on_request`), because the Fn key
     /// may have changed it behind the daemon's back.
     void request(const Request &r) {
-        const auto change = model_.handle(r, now_);
+        const auto change = model_.handle(r);
         if (!change) {
             ADD_FAILURE() << "request failed: " << change.error();
             return;
@@ -121,7 +121,7 @@ class ReactionRig {
 
     /// `omen-kbd reload`: the daemon replaces the config, then recomputes.
     void reload(std::string_view config_toml) {
-        model_.replace_config(parse_config(config_toml).value(), Palette{});
+        model_.replace_config(parse_config(config_toml).value());
         sample();
     }
 
@@ -161,7 +161,7 @@ class ReactionRig {
     static Model make_model(std::string_view config_toml) {
         Config config = parse_config(config_toml).value();
         const std::string first = config.profiles.front().name;
-        return Model(std::move(config), Palette{}, PersistedState::default_for(first), "mock");
+        return Model(std::move(config), PersistedState::default_for(first), "mock");
     }
 
     [[nodiscard]] Duration tick() const {

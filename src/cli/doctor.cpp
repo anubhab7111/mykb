@@ -1,7 +1,6 @@
 #include "cli/doctor.hpp"
 
 #include "backend/sysfs.hpp"
-#include "core/palette.hpp"
 #include "ipc/socket.hpp"
 #include "util/strings.hpp"
 
@@ -250,7 +249,6 @@ void check_daemon(const DoctorEnv &env, std::vector<Check> &out) {
 }
 
 void check_hooks(const DoctorEnv &env, std::vector<Check> &out) {
-    std::optional<fs::path> hook;
     std::optional<fs::path> lock;
     std::error_code ec;
     fs::recursive_directory_iterator it(env.hypr_dir,
@@ -272,17 +270,9 @@ void check_hooks(const DoctorEnv &env, std::vector<Check> &out) {
         if (!text) {
             continue;
         }
-        if (!hook && text->find("omen-kbd hint") != std::string::npos) {
-            hook = it->path();
-        }
         if (!lock && text->find("omen-kbd flag locked") != std::string::npos) {
             lock = it->path();
         }
-    }
-    if (hook) {
-        out.push_back({Level::Ok, "mode-colors hook installed (" + hook->string() + ")"});
-    } else {
-        out.push_back({Level::Warn, "mode-colors hook not installed (omen-kbd gen-hyprland)"});
     }
     if (lock) {
         out.push_back({Level::Ok, "lock gate wired (" + lock->string() + ")"});
@@ -293,22 +283,9 @@ void check_hooks(const DoctorEnv &env, std::vector<Check> &out) {
     }
 }
 
-void check_theme(const DoctorEnv &env, std::vector<Check> &out) {
-    const auto palette = Palette::load(env.theme_dir);
-    if (!palette) {
-        out.push_back({Level::Warn, "no theme palette: " + palette.error() +
-                                        " (theme: colors fall back to their defaults)"});
-    } else if (palette->empty()) {
-        out.push_back({Level::Warn, "theme palette in " + env.theme_dir.string() + " is empty"});
-    } else {
-        out.push_back({Level::Ok, std::format("theme palette: {} colors ({})", palette->size(),
-                                              env.theme_dir.string())});
-    }
-}
-
 } // namespace
 
-DoctorEnv DoctorEnv::real(const Config &cfg) {
+DoctorEnv DoctorEnv::real() {
     const char *xdg = std::getenv("XDG_CONFIG_HOME");
     const char *home = std::getenv("HOME");
     const fs::path config_home = (xdg != nullptr && *xdg != '\0') ? fs::path(xdg)
@@ -318,7 +295,6 @@ DoctorEnv DoctorEnv::real(const Config &cfg) {
             .proc_root = "/proc",
             .dkms_root = "/var/lib/dkms",
             .hypr_dir = config_home / "hypr",
-            .theme_dir = cfg.theme.dir,
             .socket = socket_path()};
 }
 
@@ -329,7 +305,6 @@ std::vector<Check> run_checks(const DoctorEnv &env) {
     check_dkms(env, out);
     check_daemon(env, out);
     check_hooks(env, out);
-    check_theme(env, out);
     return out;
 }
 

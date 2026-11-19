@@ -39,14 +39,8 @@ class Reactions {
 
     /// Takes new settings. Lamp keys stay, with the new styles at once; a clip already playing
     /// finishes with the look it started with, and the next one has the new look. `enabled = false`
-    /// drops every lamp and clip, and forgets the focused window. `resolve` is only used during the
-    /// call.
-    void reconfigure(const ReactionsCfg &cfg, const Resolver &resolve);
-
-    /// The palette changed: re-resolves the colors of the settings kept by the last `reconfigure`.
-    /// Keys, intros in flight and playing clips keep their state. `resolve` is only used during the
-    /// call.
-    void restyle(const Resolver &resolve);
+    /// drops every lamp and clip, and forgets the focused window.
+    void reconfigure(const ReactionsCfg &cfg);
 
     /// Takes the signal `sig` at `now`. Ignored while disabled. Short reactions and lamp intros
     /// need `short_ok`, which is a visible keyboard and a present user; without it a lamp lights

@@ -47,19 +47,4 @@ UniqueFd connect_nonblocking(const std::filesystem::path &path);
 /// Sends one request and waits (up to 5 s) for its response.
 std::expected<Response, IpcError> request(const std::filesystem::path &path, const Request &r);
 
-/// A status stream from `subscribe`. Owns the connection.
-class Subscription {
-  public:
-    explicit Subscription(UniqueFd fd) : fd_(std::move(fd)) {}
-    /// The next status pushed by the daemon; nullopt when the daemon closed the stream.
-    std::expected<std::optional<Status>, IpcError> next_status();
-
-  private:
-    UniqueFd fd_;
-    LineBuffer lines_;
-};
-
-/// Sends `subscribe` and returns the stream of statuses that follows.
-std::expected<Subscription, IpcError> subscribe(const std::filesystem::path &path);
-
 } // namespace omenkbd

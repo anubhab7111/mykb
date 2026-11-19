@@ -55,12 +55,6 @@ std::optional<HyprEvent> parse_socket2_line(std::string_view line) {
     }
     const std::string_view name = line.substr(0, arrows);
     const std::string_view data = line.substr(arrows + 2);
-    if (name == "submap") {
-        if (data.empty()) {
-            return HyprEvent{hypr::Submap{std::nullopt}};
-        }
-        return HyprEvent{hypr::Submap{std::string(data)}};
-    }
     if (name == "workspacev2") {
         if (const auto id = parse_id(before_comma(data))) {
             return HyprEvent{hypr::WorkspaceV2{*id}};

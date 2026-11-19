@@ -11,78 +11,60 @@
 
 using namespace omenkbd;
 
-TEST(Config, ExampleConfigShipsTheFourSlowGlowProfiles) {
+TEST(Config, TheExampleConfigShipsOnlyTheGameProfile) {
     const Config c = embedded_default();
-    const std::vector<std::pair<std::string, Effect>> want{{"drift", Effect::Drift},
-                                                           {"lavender-glow", Effect::Glow},
-                                                           {"tide", Effect::Tide},
-                                                           {"dusk", Effect::Dusk}};
-    for (const auto &[name, effect] : want) {
-        const auto it = std::ranges::find(c.profiles, name, &ProfileCfg::name);
-        ASSERT_NE(it, c.profiles.end()) << name;
-        EXPECT_EQ(it->effect, effect) << name;
-        EXPECT_EQ(it->colors.size(), 4u) << name;
+    ASSERT_EQ(c.profiles.size(), 1u);
+    EXPECT_EQ(c.profiles[0].name, "game");
+    EXPECT_EQ(c.profiles[0].effect, Effect::Static);
+}
+
+TEST(Config, TheOldEffectNamesAreGone) {
+    for (const char *old : {"breathe", "wave", "cycle", "gradient"}) {
+        const auto r =
+            parse_config(std::string("[[profiles]]\nname = \"x\"\ncolors = [\"#ffffff\"]\n"
+                                     "effect = \"") +
+                         old + "\"\n");
+        ASSERT_FALSE(r.has_value()) << old;
+        EXPECT_NE(r.error().find("static, drift, glow, tide or dusk"), std::string::npos)
+            << r.error();
     }
 }
 
-TEST(Config, TheGlowSnippetParsesAndMatchesTheExampleConfig) {
-    std::ifstream f(std::string{OMEN_KBD_SOURCE_DIR} + "/packaging/snippets/catppuccin-glows.toml");
-    ASSERT_TRUE(f.good());
-    const std::string text{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
-    const auto snippet = parse_config(text);
-    ASSERT_TRUE(snippet.has_value()) << snippet.error();
-    ASSERT_EQ(snippet->profiles.size(), 4u);
-    const Config example = embedded_default();
-    for (const ProfileCfg &p : snippet->profiles) {
-        const auto it = std::ranges::find(example.profiles, p.name, &ProfileCfg::name);
-        ASSERT_NE(it, example.profiles.end()) << p.name;
-        EXPECT_EQ(it->effect, p.effect) << p.name;
-        EXPECT_EQ(it->colors.size(), p.colors.size()) << p.name;
+TEST(Config, ThemeColorsAndTheOldTablesAreRejectedWithAClearError) {
+    const auto theme_color = parse_config("[[profiles]]\nname='a'\ncolors=['theme:mauve']");
+    ASSERT_FALSE(theme_color.has_value());
+    EXPECT_NE(theme_color.error().find("theme colors were removed"), std::string::npos)
+        << theme_color.error();
+    for (const char *table : {"[theme]\ncolors = 'vivid'", "[hints]\ntimeout_s = 5"}) {
+        const auto r =
+            parse_config(std::string(table) + "\n[[profiles]]\nname='a'\ncolors=['#000000']");
+        ASSERT_FALSE(r.has_value()) << table;
+        EXPECT_NE(r.error().find("unknown"), std::string::npos) << r.error();
     }
-}
-
-TEST(Config, TheUnknownEffectErrorListsTheGlows) {
-    const auto r =
-        parse_config("[[profiles]]\nname = \"x\"\ncolors = [\"#ffffff\"]\neffect = \"sparkle\"\n");
-    ASSERT_FALSE(r.has_value());
-    EXPECT_NE(r.error().find("drift, glow, tide or dusk"), std::string::npos) << r.error();
 }
 
 TEST(Config, ExampleConfigParses) {
     const Config c = embedded_default();
-    EXPECT_EQ(c.profiles.size(), 7u);
+    EXPECT_EQ(c.profiles.size(), 1u);
     EXPECT_FALSE(c.effects.enabled);
-    EXPECT_TRUE(c.hints.modifiers.contains("super+shift"));
-    EXPECT_EQ(c.hints.timeout_s, 15u);
     EXPECT_EQ(c.gates.on_idle, GateAction::Dim);
-    EXPECT_EQ(c.rules.size(), 4u);
+    EXPECT_EQ(c.rules.size(), 3u);
 }
 
 TEST(Config, EmbeddedDefaultEnablesReactions) {
     const Config c = embedded_default();
     EXPECT_TRUE(c.reactions.enabled);
     EXPECT_EQ(c.reactions.step_ms, 120u);
-    EXPECT_EQ(c.reactions.notify.apps.size(), 2u);
+    EXPECT_FALSE(c.reactions.workspace.color) << "no color is built in";
+    EXPECT_FALSE(c.reactions.notify.color);
+    EXPECT_FALSE(c.reactions.agent.waiting);
+    EXPECT_TRUE(c.reactions.notify.apps.empty());
 }
 
 TEST(Config, MissingFileGivesDefault) {
     const auto c = load_config("/nonexistent/x.toml");
     ASSERT_TRUE(c.has_value()) << c.error();
-    EXPECT_EQ(c->profiles[0].name, "default");
-}
-
-TEST(Config, NormalizesModifierKeys) {
-    EXPECT_EQ(normalize_mods("Shift+SUPER").value(), "super+shift");
-    EXPECT_EQ(normalize_mods("alt+ctrl+alt").value(), "ctrl+alt");
-    EXPECT_FALSE(normalize_mods("hyper").has_value());
-    EXPECT_FALSE(normalize_mods("").has_value());
-}
-
-TEST(Config, ModifierKeysInConfigAreNormalized) {
-    const auto c = parse_config("[hints.modifiers]\n\"Shift+Super\" = '#0000ff'\n[[profiles]]\n"
-                                "name='a'\ncolors=['#000000']");
-    ASSERT_TRUE(c.has_value()) << c.error();
-    EXPECT_TRUE(c->hints.modifiers.contains("super+shift"));
+    EXPECT_EQ(c->profiles[0].name, "game");
 }
 
 TEST(Config, RejectsInvalid) {
@@ -94,7 +76,6 @@ TEST(Config, RejectsInvalid) {
         {"[[profiles]]\nname='custom'\ncolors=['#000000']", "custom"},
         {"[[profiles]]\nname='a'\ncolors=['#000000']\n[[rules]]\nname='r'\nwhen={}\nprofile='zzz'",
          "zzz"},
-        {"[hints.modifiers]\nhyper='#000000'\n[[profiles]]\nname='a'\ncolors=['#000000']", "hyper"},
         {"[[profiles]]\nname='a'\ncolors=['#000000']\nspeed=0", "speed"},
         {"[bogus]\nx=1\n[[profiles]]\nname='a'\ncolors=['#000000']", "bogus"},
         {"", "profile"},
@@ -107,17 +88,13 @@ TEST(Config, RejectsInvalid) {
 }
 
 TEST(Config, ASectionOrSubTableThatIsNotATableIsRejectedNamingItsKey) {
-    // The root sections name only the key; the sub-tables of `device` and `hints` lead with the
+    // The root sections name only the key; the sub-tables of `device` lead with the
     // section, like the other errors of those sections.
     const std::pair<const char *, const char *> cases[] = {
         {"device = 1", "`device` must be a table"},
         {"effects = true", "`effects` must be a table"},
-        {"theme = 'x'", "`theme` must be a table"},
         {"gates = []", "`gates` must be a table"},
-        {"hints = 1", "`hints` must be a table"},
         {"[device]\nzone_map = 1", "device: `zone_map` must be a table"},
-        {"[hints]\nmodifiers = 1", "hints: `modifiers` must be a table"},
-        {"[hints]\nsubmaps = 'x'", "hints: `submaps` must be a table"},
     };
     for (const auto &[snippet, expected] : cases) {
         const auto c = parse_config(std::string(snippet) + "\n[[profiles]]\nname='a'\n"
@@ -125,15 +102,6 @@ TEST(Config, ASectionOrSubTableThatIsNotATableIsRejectedNamingItsKey) {
         ASSERT_FALSE(c.has_value()) << snippet;
         EXPECT_EQ(c.error(), expected) << snippet;
     }
-}
-
-TEST(Config, ThemeDirExpandsHome) {
-    const char *home = std::getenv("HOME");
-    ASSERT_NE(home, nullptr);
-    const auto c =
-        parse_config("[theme]\ndir = '~/x/y'\n[[profiles]]\nname='a'\ncolors=['#000000']");
-    ASSERT_TRUE(c.has_value()) << c.error();
-    EXPECT_EQ(c->theme.dir, std::filesystem::path(home) / "x/y");
 }
 
 TEST(Config, NeedsCpuTempOnlyWithATemperatureRule) {

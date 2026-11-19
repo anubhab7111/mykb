@@ -62,29 +62,39 @@ TEST(Cli, BrightnessAcceptsNegativeDelta) {
     EXPECT_EQ(parse({"brightness", "40"}).first, Request{req::Brightness{"40"}});
 }
 
-TEST(Cli, SetRequiresOneOrFourColors) {
-    EXPECT_EQ(parse({"set", "#ff0000"}).first, Request{req::Set{{"#ff0000"}}});
-    EXPECT_EQ(parse({"set", "#ff0000", "#00ff00", "#0000ff", "theme:blue"}).first,
-              (Request{req::Set{{"#ff0000", "#00ff00", "#0000ff", "theme:blue"}}}));
-    const auto [two, err] = parse({"set", "#ff0000", "#00ff00"});
-    EXPECT_FALSE(two.has_value());
-    EXPECT_NE(err.find("1 or 4"), std::string::npos) << err;
-    EXPECT_FALSE(parse({"set"}).first.has_value());
+TEST(Cli, SetIsTheOneLightingCommand) {
+    const auto set = [](std::vector<std::string> look, std::optional<std::string> effect = {},
+                        std::optional<std::uint8_t> speed = {}) {
+        return Request{req::Set{std::move(look), std::move(effect), speed}};
+    };
+    EXPECT_EQ(parse({"set", "#ff0000"}).first, set({"#ff0000"}));
+    EXPECT_EQ(parse({"set", "#ff0000", "#00ff00", "#0000ff", "#ffffff"}).first,
+              set({"#ff0000", "#00ff00", "#0000ff", "#ffffff"}));
+    EXPECT_EQ(parse({"set", "game"}).first, set({"game"}));
+    EXPECT_EQ(parse({"set", "--effect", "glow"}).first, set({}, "glow"));
+    EXPECT_EQ(parse({"set", "#aabbcc", "#112233", "--effect", "Drift", "--speed", "80"}).first,
+              set({"#aabbcc", "#112233"}, "drift", std::uint8_t{80}))
+        << "a bad count is the daemon's to report; the effect name is case-insensitive";
+    EXPECT_EQ(parse({"set", "--speed", "30"}).first, set({}, std::nullopt, std::uint8_t{30}));
+    EXPECT_FALSE(parse({"set"}).first.has_value()) << "set needs something to set";
+    EXPECT_FALSE(parse({"set", "--effect", "wave"}).first.has_value())
+        << "the old effects are gone";
+    EXPECT_FALSE(parse({"set", "--effect", "glow", "--speed", "0"}).first.has_value());
     EXPECT_FALSE(parse({"set", "a", "b", "c", "d", "e"}).first.has_value());
+}
+
+TEST(Cli, TheOldCommandsAreGone) {
+    for (const char *old : {"profile", "effect", "hint", "waybar", "gen-hyprland"}) {
+        EXPECT_FALSE(parse({old}).first.has_value()) << old;
+    }
 }
 
 TEST(Cli, CommandsMapToRequests) {
     EXPECT_EQ(parse({"status"}).first, Request{req::Status{}});
     EXPECT_EQ(parse({"status", "--json"}).first, Request{req::Status{}});
-    EXPECT_EQ(parse({"profile", "next"}).first, Request{req::Profile{"next"}});
     EXPECT_EQ(parse({"on"}).first, Request{req::Power{req::PowerAction::On}});
     EXPECT_EQ(parse({"off"}).first, Request{req::Power{req::PowerAction::Off}});
     EXPECT_EQ(parse({"toggle"}).first, Request{req::Power{req::PowerAction::Toggle}});
-    EXPECT_EQ(parse({"effect", "glow"}).first, (Request{req::Effect{"glow", std::nullopt}}));
-    EXPECT_EQ(parse({"effect", "tide", "--speed", "80"}).first,
-              (Request{req::Effect{"tide", std::uint8_t{80}}}));
-    EXPECT_FALSE(parse({"effect", "glow", "--speed", "0"}).first.has_value());
-    EXPECT_EQ(parse({"hint", "super+shift"}).first, Request{req::Hint{"super+shift"}});
     EXPECT_EQ(parse({"idle", "on"}).first, Request{req::Idle{true}});
     EXPECT_FALSE(parse({"idle", "maybe"}).first.has_value());
     EXPECT_EQ(parse({"flag", "locked", "off"}).first, (Request{req::Flag{"locked", false}}));
@@ -92,7 +102,7 @@ TEST(Cli, CommandsMapToRequests) {
     const auto [daemon, err] = parse({"daemon", "--backend", "mock", "--no-sources"});
     EXPECT_FALSE(daemon.has_value()) << "not a request";
     EXPECT_EQ(err, "");
-    for (const char *local : {"doctor", "gen-hyprland"}) {
+    for (const char *local : {"doctor"}) {
         const auto [r, e] = parse({local});
         EXPECT_FALSE(r.has_value()) << local << " is not a request";
         EXPECT_EQ(e, "") << local;
@@ -100,56 +110,11 @@ TEST(Cli, CommandsMapToRequests) {
     EXPECT_FALSE(parse({"explode"}).first.has_value());
 }
 
-// Waybar renders text and tooltip as Pango markup; user text must not break it.
-TEST(Cli, WaybarEscapesPangoMarkup) {
-    Status s = sample();
-    s.profile = "R&D <night>";
-    s.last_error = "can't write \"zones\" & <backlight>";
-    const auto j = waybar_json(s);
-    EXPECT_EQ(j["text"], "󰌌 R&amp;D &lt;night&gt;");
-    const auto tooltip = j["tooltip"].get<std::string>();
-    EXPECT_NE(tooltip.find("R&amp;D &lt;night&gt;"), std::string::npos) << tooltip;
-    EXPECT_NE(tooltip.find("can't write \"zones\" &amp; &lt;backlight&gt;"), std::string::npos)
-        << tooltip;
-    EXPECT_EQ(tooltip.find("R&D"), std::string::npos);
-    EXPECT_EQ(format_status(s).find("&amp;"), std::string::npos) << "plain text for the CLI";
-}
-
-TEST(Cli, WaybarOnOffHintError) {
-    const auto on = waybar_json(sample());
-    EXPECT_EQ(on["text"], "󰌌 default");
-    EXPECT_EQ(on["class"], "on");
-    EXPECT_EQ(on["percentage"], 70);
-    EXPECT_NE(on["tooltip"].get<std::string>().find("profile"), std::string::npos);
-
-    Status off = sample();
-    off.on = false;
-    EXPECT_EQ(waybar_json(off)["text"], "󰌐 off");
-    EXPECT_EQ(waybar_json(off)["class"], "off");
-
-    Status hint = sample();
-    hint.hint = "super";
-    EXPECT_EQ(waybar_json(hint)["class"], "hint");
-    EXPECT_EQ(waybar_json(hint)["text"], "󰌌 default");
-
-    Status effect = sample();
-    effect.animated = true;
-    EXPECT_EQ(waybar_json(effect)["class"], "effect");
-
-    Status error = hint;
-    error.last_error = "boom";
-    EXPECT_EQ(waybar_json(error)["class"], "error");
-    Status budget = sample();
-    budget.budget_exhausted = true;
-    EXPECT_EQ(waybar_json(budget)["class"], "error");
-}
-
 TEST(Cli, FormatStatusHasPinnedLabels) {
     Status s = sample();
-    s.hint = "super";
     s.active_rules = {"gamemode", "power saver dims"};
     const auto plain = lines_of(format_status(s));
-    for (const char *label : {"profile", "zones", "brightness", "hint", "rules", "backend"}) {
+    for (const char *label : {"profile", "zones", "brightness", "rules", "backend"}) {
         EXPECT_NE(line_with_label(plain, label), nullptr) << "missing label " << label;
     }
     for (const char *label : {"error", "budget", "warnings"}) {
@@ -159,7 +124,6 @@ TEST(Cli, FormatStatusHasPinnedLabels) {
               std::string::npos);
     EXPECT_NE(line_with_label(plain, "brightness")->find("70%  on  backlight on"),
               std::string::npos);
-    EXPECT_NE(line_with_label(plain, "hint")->find("super"), std::string::npos);
     EXPECT_NE(line_with_label(plain, "rules")->find("gamemode, power saver dims"),
               std::string::npos);
     EXPECT_NE(line_with_label(plain, "backend")->find("mock  writes 42"), std::string::npos);

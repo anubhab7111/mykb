@@ -1,14 +1,11 @@
 # omen-kbd configuration. Zone order everywhere: left, middle, right, wasd.
+# Colors are always #rrggbb. Nothing here ships with a color except the game profile.
 [device]
 zone_map = { left = 2, middle = 1, right = 0, wasd = 3 }
 
 [effects]
-enabled = false   # animations are opt-in (colors may live in non-volatile memory)
-fps = 10
-
-[theme]
-colors = "vivid"  # or "exact"
-dir = "~/.config/theming/current"
+enabled = false   # effects are opt-in (the colors may live in non-volatile memory)
+fps = 10          # how often the daemon looks at an effect; the frame itself changes twice a second
 
 [gates]
 on_lock = "off"
@@ -16,17 +13,8 @@ on_idle = "dim"
 dim_brightness = 20
 pause_effects_on_battery = true
 
-[hints]
-timeout_s = 15
-delay_ms = 250
-[hints.modifiers]
-super = "theme:mauve"
-"super+shift" = "theme:blue"
-ctrl = "theme:peach"
-[hints.submaps]
-resize = "theme:teal"
-
-# Short keyboard reactions. A missing [reactions] table means off; every key below is optional.
+# Short keyboard reactions. A missing [reactions] table means off. A reaction with no color set is
+# off, so only the window pulses run until you add colors. Every key is optional.
 [reactions]
 enabled = true
 step_ms = 120            # one step of a sweep or pulse (60-1000)
@@ -34,7 +22,7 @@ blink_ms = 150           # one on or off phase of a blink (60-1000)
 max_per_minute = 30      # short reactions started per rolling minute (1-600)
 
 [reactions.workspace]
-color = "theme:lavender"
+# color = "#b4befe"      # a sweep across the zones on a workspace switch
 wasd_with = "left"       # "left" | "middle" | "none"
 
 [reactions.window]
@@ -43,63 +31,32 @@ close = 0.35             # dip to this fraction (0-1; 1 = off)
 cooldown_ms = 500        # (0-10000)
 
 [reactions.notify]
-color = "theme:blue"
-critical = "theme:red"
+# color = "#89b4fa"      # a flash for each notification
+# critical = "#f38ba8"   # a critical notification
 min_urgency = "normal"   # "low" | "normal" | "critical"
 skip_if_focused = true
-# quote keys that contain dots: "com.example.app" = "theme:blue"
-[reactions.notify.apps]  # matched case-insensitively; this table replaces the built-in apps
-zapzap = "theme:green"
-discord = "#5865f2"
+# [reactions.notify.apps]  # per-app colors, matched case-insensitively; quote keys with dots
+# zapzap = "#a6e3a1"
 
 [reactions.urgent]
 zones = ["right"]        # [] turns the lamp off
-color = "theme:yellow"
+# color = "#f9e2af"      # the attention light for an urgent window
 blinks = 2               # (0-5); then steady
 
 [reactions.agent]
 zones = ["wasd"]         # [] turns the lamp off
-waiting = "theme:peach"  # orange on the keyboard with colors = "vivid"; "#ffb000" is true amber
-done = "theme:green"
+# waiting = "#ffb000"    # Claude Code is waiting for you
+# done = "#a6e3a1"       # Claude Code finished
 blinks = 2               # (0-5); then steady
 ttl_s = 3600             # (60-86400)
 
-[[profiles]]
-name = "default"
-colors = ["theme:mauve", "theme:blue", "theme:teal", "theme:peach"]
-
+# Profiles are named looks: `omen-kbd set game`. Add your own. colors is one color (all zones) or
+# four (left, middle, right, wasd); effect is static, drift, glow, tide or dusk; speed is 1-100.
+#   drift and dusk use all four colors as stops, glow the first two, tide the first three for the
+#   wave and the fourth (WASD) as a steady accent. Effects need [effects] enabled = true.
 [[profiles]]
 name = "game"
 colors = ["#202020", "#202020", "#202020", "#ff0000"]
-
-[[profiles]]
-name = "white"
-colors = ["#ffffff"]
-
-# Slow Catppuccin glows. Their colors are theme colors, so they follow Mocha/Latte on their own.
-# Each changes the keyboard twice a second (7200 writes an hour, under a fifth of the budget).
-# `speed` (default 50) stretches or shortens the loop up to 4x either way. Needs [effects] enabled.
-# colors: drift and dusk use all four as stops; glow uses the first two; tide uses the first three
-# for the wave and the fourth (WASD) as a steady accent.
-[[profiles]]
-name = "drift"   # mauve, blue, teal flowing left to right, like the Hyprland border (32 s loop)
-colors = ["theme:mauve", "theme:blue", "theme:teal", "theme:blue"]
-effect = "drift"
-
-[[profiles]]
-name = "lavender-glow"   # the whole keyboard breathing between lavender and mauve (14 s)
-colors = ["theme:lavender", "theme:mauve", "theme:lavender", "theme:mauve"]
-effect = "glow"
-
-[[profiles]]
-name = "tide"   # a blue, sapphire and teal wave rolling back and forth, WASD steady mauve (20 s)
-colors = ["theme:blue", "theme:sapphire", "theme:teal", "theme:mauve"]
-effect = "tide"
-
-[[profiles]]
-name = "dusk"   # peach, pink, mauve and blue cross-fading warm to cool and back (36 s)
-colors = ["theme:peach", "theme:pink", "theme:mauve", "theme:blue"]
-effect = "dusk"
 
 [[rules]]
 name = "gamemode"
@@ -117,7 +74,7 @@ name = "power saver dims"
 when = { power_profile = "power-saver" }
 brightness_cap = 40
 
-[[rules]]
-name = "low battery"
-when = { on_battery = true, battery_below = 15 }
-overlay = { zones = ["right"], color = "#ff0000", pulse = true }
+# [[rules]]
+# name = "low battery"
+# when = { on_battery = true, battery_below = 15 }
+# overlay = { zones = ["right"], color = "#ff0000", pulse = true }

@@ -5,7 +5,6 @@
 #include "sources/hyprland.hpp"
 #include "sources/hyprland_bridge.hpp"
 #include "sources/system_dbus.hpp"
-#include "sources/theme.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -34,7 +33,7 @@ constexpr Clock::duration kSaveCounterOnly = 60s;
 constexpr Clock::duration kAcceptRetry = 100ms;
 /// A request line is well under 1 KiB; anything this long is not a client of ours.
 constexpr std::size_t kMaxIn = std::size_t{64} * 1024;
-/// A subscriber this far behind is not reading; drop it rather than buffer forever.
+/// A client this far behind is not reading; drop it rather than buffer forever.
 constexpr std::size_t kMaxOut = std::size_t{1024} * 1024;
 
 void warn(std::string_view msg) { std::println(stderr, "omen-kbd: warning: {}", msg); }
@@ -42,7 +41,7 @@ void warn(std::string_view msg) { std::println(stderr, "omen-kbd: warning: {}", 
 /// Nothing polls the backlight while a static profile shows, so these read it first: after the
 /// Fn key, `status` must say off and one `toggle` must turn the light back on.
 bool needs_backlight_read(const Request &r) {
-    if (std::holds_alternative<req::Status>(r) || std::holds_alternative<req::Subscribe>(r)) {
+    if (std::holds_alternative<req::Status>(r)) {
         return true;
     }
     const auto *p = std::get_if<req::Power>(&r);
@@ -128,14 +127,6 @@ void Daemon::handle_event(const Event &ev) {
                     save();
                 } else {
                     force_next_ = true; // the firmware may have reset the colors and backlight
-                }
-            } else if constexpr (std::is_same_v<T, event::Submap>) {
-                model_.set_submap(e.name);
-            } else if constexpr (std::is_same_v<T, event::ThemeChanged>) {
-                if (auto p = Palette::load(model_.config().theme.dir)) {
-                    model_.set_palette(std::move(*p));
-                } else {
-                    model_.add_warning(p.error());
                 }
             } else if constexpr (std::is_same_v<T, event::HwBacklight>) {
                 model_.set_hw_backlight(e.on, Clock::now());
@@ -231,27 +222,7 @@ std::optional<std::uint64_t> Daemon::recompute() {
     }
     next_probe_ = model_.wants_animation() ? std::optional(next_probe_.value_or(now + kProbeEvery))
                                            : std::nullopt;
-    broadcast();
     return sent;
-}
-
-void Daemon::broadcast() {
-    Status s = status();
-    if (last_status_ == s) {
-        return;
-    }
-    const std::string line = encode(Response::success(s)) + "\n";
-    last_status_ = std::move(s);
-    std::vector<std::uint64_t> subs;
-    for (auto &[id, c] : clients_) {
-        if (c.subscriber) {
-            c.out += line;
-            subs.push_back(id);
-        }
-    }
-    for (const auto id : subs) {
-        service(id);
-    }
 }
 
 void Daemon::schedule_save(Clock::duration within) {
@@ -309,9 +280,7 @@ void Daemon::on_client(std::uint64_t id, std::uint32_t events) {
         for (;;) {
             const ssize_t n = ::read(c.fd.get(), buf, sizeof(buf));
             if (n > 0) {
-                if (!c.subscriber) { // input after `subscribe` is ignored
-                    c.in.append({buf, static_cast<std::size_t>(n)});
-                }
+                c.in.append({buf, static_cast<std::size_t>(n)});
                 if (c.in.pending() > kMaxIn) {
                     break;
                 }
@@ -340,14 +309,14 @@ void Daemon::service(std::uint64_t id) {
         return;
     }
     Client &c = it->second;
-    while (!c.awaiting && !c.subscriber) {
+    while (!c.awaiting) {
         auto line = c.in.next_line();
         if (!line) {
             break;
         }
         handle_line(id, c, *line);
     }
-    if (!c.awaiting && !c.subscriber && c.in.pending() > kMaxIn) {
+    if (!c.awaiting && c.in.pending() > kMaxIn) {
         respond(id, Response::failure("request line too long"));
         c.in = LineBuffer{};
         c.eof = true;
@@ -396,24 +365,13 @@ void Daemon::on_request(std::uint64_t id, Client &c, const Request &r, bool back
         respond(id, Response::success(status()));
         return;
     }
-    if (std::holds_alternative<req::Subscribe>(r)) {
-        respond(id, Response::success(status()));
-        c.subscriber = true;
-        c.in = LineBuffer{};
-        return;
-    }
     if (std::holds_alternative<req::Reload>(r)) {
         auto config = load_config(opts_.config_path);
         if (!config) {
             respond(id, Response::failure(config.error()));
             return;
         }
-        auto palette = Palette::load(config->theme.dir);
-        if (!palette) {
-            model_.add_warning(palette.error());
-        }
-        Palette p = palette ? std::move(*palette) : Palette(model_.palette());
-        model_.replace_config(std::move(*config), std::move(p));
+        model_.replace_config(std::move(*config));
         if (!model_.config().reactions.enabled) {
             // R4: off means not even a read, so no read is asked again for these.
             pending_signals_.clear();
@@ -425,7 +383,7 @@ void Daemon::on_request(std::uint64_t id, Client &c, const Request &r, bool back
         respond(id, Response::success(status()));
         return;
     }
-    const auto change = model_.handle(r, Clock::now());
+    const auto change = model_.handle(r);
     if (!change) {
         respond(id, Response::failure(change.error()));
         return;
@@ -493,7 +451,6 @@ void Daemon::on_writer() {
             // Never recompute here: after an error that would re-send the same frame at once and
             // spin while the error persists. The next change (or, during an effect, the next tick
             // — which shows the static frame once a budget error stops animation) retries.
-            broadcast();
             for (const auto id : done) {
                 service(id);
             }
@@ -542,7 +499,6 @@ std::optional<TimePoint> Daemon::next_wake() const {
         }
     };
     consider(next_tick_);
-    consider(model_.hint_deadline());
     consider(reaction_wake());
     consider(save_at_);
     consider(next_probe_);
@@ -610,7 +566,7 @@ void Daemon::on_wake() {
     }
     // The reaction deadline includes the past one of a visibility change (Ruling P17): the frame
     // takes the new visibility and moves the deadline on, or the loop would wake here forever.
-    if (due(next_tick_) || due(model_.hint_deadline()) || due(reaction_wake())) {
+    if (due(next_tick_) || due(reaction_wake())) {
         recompute();
     }
 }
@@ -639,12 +595,6 @@ int run_daemon(const RunOptions &opts) {
     const std::string first = config->profiles.front().name;
     const Config config_for_sources = *config; // the model takes the original
     std::vector<std::string> warnings;
-    Palette palette;
-    if (auto p = Palette::load(config->theme.dir)) {
-        palette = std::move(*p);
-    } else {
-        warnings.push_back(p.error());
-    }
     auto [persisted, state_warning] = PersistedState::load(opts.state_path, first);
     if (state_warning) {
         warnings.push_back(*state_warning);
@@ -658,8 +608,7 @@ int run_daemon(const RunOptions &opts) {
         std::println(stderr, "omen-kbd: {}", b.error().message());
         return 1;
     }
-    Model model(std::move(*config), std::move(palette), std::move(persisted),
-                std::string(backend->name()));
+    Model model(std::move(*config), std::move(persisted), std::string(backend->name()));
     for (const auto &w : warnings) {
         warn(w);
         model.add_warning(w);
@@ -681,19 +630,12 @@ int run_daemon(const RunOptions &opts) {
 
     // Event sources run on the loop thread and feed handle_event directly.
     std::optional<HyprlandBridge> hyprland;
-    std::optional<ThemeWatcher> theme;
-    std::optional<std::filesystem::path> theme_dir;
     std::optional<HwmonPoller> hwmon;
     std::optional<SystemDbusSource> system;
     const auto emit = [&d](const Event &e) { d.handle_event(e); };
     const auto sync_sources = [&](const Config &c) {
         if (hyprland) {
             hyprland->configure(c.reactions.enabled, c.needs_fullscreen());
-        }
-        if (theme_dir != c.theme.dir) {
-            theme.reset();
-            theme.emplace(d.loop(), c.theme.dir, emit);
-            theme_dir = c.theme.dir;
         }
         if (c.needs_cpu_temp() && !hwmon) {
             hwmon.emplace(d.loop(), opts.sys_root, emit); // only while a rule needs it

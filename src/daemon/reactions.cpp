@@ -20,11 +20,16 @@ std::optional<std::string> window_or_none(const std::optional<std::string> &wind
 
 } // namespace
 
-Reactions::Reactions() : look_(cfg_, [](const ColorRef &) { return Rgb{}; }) {}
+Reactions::Reactions() : look_(cfg_) {}
 
-void Reactions::reconfigure(const ReactionsCfg &cfg, const Resolver &resolve) {
+void Reactions::reconfigure(const ReactionsCfg &cfg) {
     cfg_ = cfg;
-    restyle(resolve);
+    // Keys and intros in flight keep their state: only what is built from here on, and the lamps'
+    // paint, take the new look.
+    look_ = LookBook(cfg_);
+    player_.set_limits(look_.limits());
+    lamps_.set_style(LampKind::Agent, look_.agent_style());
+    lamps_.set_style(LampKind::Urgent, look_.urgent_style());
     if (!cfg_.enabled) {
         lamps_.clear_kind(LampKind::Agent);
         lamps_.clear_kind(LampKind::Urgent);
@@ -34,15 +39,6 @@ void Reactions::reconfigure(const ReactionsCfg &cfg, const Resolver &resolve) {
         focused_window_.clear();
         focused_class_.clear();
     }
-}
-
-void Reactions::restyle(const Resolver &resolve) {
-    // Clips already built, keys and intros in flight keep their state: only what is built from here
-    // on, and the lamps' paint, take the new look.
-    look_ = LookBook(cfg_, resolve);
-    player_.set_limits(look_.limits());
-    lamps_.set_style(LampKind::Agent, look_.agent_style());
-    lamps_.set_style(LampKind::Urgent, look_.urgent_style());
 }
 
 void Reactions::on_signal(const Signal &sig, TimePoint now, Visibility visibility) {

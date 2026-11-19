@@ -13,26 +13,12 @@ constexpr Rgb G{0, 255, 0};
 constexpr Rgb B{0, 0, 255};
 constexpr Rgb W = kWhite;
 
-Palette palette() {
-    return Palette::from_waybar_css(
-        "@define-color mauve #cba6f7;\n@define-color blue #89b4fa;\n@define-color teal "
-        "#94e2d5;\n@define-color peach #fab387;\n@define-color red #f38ba8;\n");
-}
-
-Model model() {
-    return Model(embedded_default(), palette(), PersistedState::default_for("default"), "mock");
-}
+Model model() { return Model(embedded_default(), PersistedState::default_for("game"), "mock"); }
 
 /// Explicit hex colors so expectations are literals.
 constexpr std::string_view kHexCfg = R"(
 [effects]
 enabled = true
-[hints]
-timeout_s = 15
-[hints.modifiers]
-super = "#0000ff"
-[hints.submaps]
-resize = "#00ff00"
 [[profiles]]
 name = "rgbw"
 colors = ["#ff0000", "#00ff00", "#0000ff", "#ffffff"]
@@ -51,25 +37,22 @@ brightness_cap = 40
 )";
 
 Model hex_model() {
-    return Model(parse_config(kHexCfg).value(), palette(), PersistedState::default_for("rgbw"),
-                 "mock");
+    return Model(parse_config(kHexCfg).value(), PersistedState::default_for("rgbw"), "mock");
 }
 
 constexpr Rgb kSweep{0x0a, 0x14, 0x1e};
 constexpr Rgb kUrgent{0xe6, 0x28, 0x28};
-constexpr Rgb kPeach{0xfa, 0xb3, 0x87}; // theme:peach in palette()
+constexpr Rgb kPeach{0xfa, 0xb3, 0x87};
 
-/// Reactions on, over a static profile. The lamp's color comes from the theme, as is.
+/// Reactions on, over a static profile.
 constexpr std::string_view kReactCfg = R"(
-[theme]
-colors = "exact"
 [reactions]
 [reactions.workspace]
 color = "#0a141e"
 [reactions.urgent]
 color = "#e62828"
 [reactions.agent]
-waiting = "theme:peach"
+waiting = "#fab387"
 ttl_s = 3600
 [[profiles]]
 name = "plain"
@@ -77,8 +60,7 @@ colors = ["#101010", "#202020", "#303030", "#404040"]
 )";
 
 Model react_model(std::string_view cfg = kReactCfg) {
-    return Model(parse_config(cfg).value(), palette(), PersistedState::default_for("plain"),
-                 "mock");
+    return Model(parse_config(cfg).value(), PersistedState::default_for("plain"), "mock");
 }
 
 /// A layer that paints `color` on `zones` only.
@@ -90,10 +72,12 @@ LayerOps lit(Rgb color, std::initializer_list<Zone> zones) {
     return ops;
 }
 
-std::expected<Change, std::string> req_(Model &m, Request r) { return m.handle(r, Clock::now()); }
+std::expected<Change, std::string> req_(Model &m, Request r) { return m.handle(r); }
 
-std::expected<Change, std::string> set(Model &m, std::vector<std::string> colors) {
-    return req_(m, req::Set{std::move(colors)});
+std::expected<Change, std::string> set(Model &m, std::vector<std::string> look,
+                                       std::optional<std::string> effect = std::nullopt,
+                                       std::optional<std::uint8_t> speed = std::nullopt) {
+    return req_(m, req::Set{std::move(look), std::move(effect), speed});
 }
 
 Inputs in(Model &m) { return m.inputs(Clock::now()).value(); }
@@ -116,26 +100,64 @@ TEST(Model, SetCustomColorsPersistsAndOutputs) {
     EXPECT_EQ(in(m).base, (Frame{G, G, G, G}));
 }
 
-TEST(Model, ProfileNextCyclesConfigOrderSkippingCustom) {
-    Model m = model();
-    const auto next = [](Model &mm) {
-        EXPECT_TRUE(req_(mm, req::Profile{"next"}).has_value());
-        return mm.persisted().active_profile;
-    };
-    EXPECT_EQ(next(m), "game");
-    EXPECT_EQ(next(m), "white");
-    for (const char *glow : {"drift", "lavender-glow", "tide", "dusk"}) {
-        EXPECT_EQ(next(m), glow);
-    }
-    EXPECT_EQ(next(m), "default");
-    ASSERT_TRUE(req_(m, req::Profile{"prev"}).has_value());
-    EXPECT_EQ(m.persisted().active_profile, "dusk");
+TEST(Model, SetByProfileNameSwitchesAndClearsTheEffectOverride) {
+    Model m = hex_model();
+    EXPECT_EQ(set(m, {"game"}), Change::OutputAndPersist);
+    EXPECT_EQ(m.persisted().active_profile, "game");
+    EXPECT_EQ(in(m).base,
+              (Frame{Rgb{0x20, 0x20, 0x20}, Rgb{0x20, 0x20, 0x20}, Rgb{0x20, 0x20, 0x20}, R}));
+
+    ASSERT_TRUE(set(m, {"rgbw"}, "dusk", std::uint8_t{30}).has_value());
+    EXPECT_EQ(in(m).effect, Effect::Dusk);
+    ASSERT_TRUE(set(m, {"rgbw"}).has_value());
+    EXPECT_EQ(in(m).effect, Effect::Glow)
+        << "a new look drops the override: the profile's own effect";
+
     ASSERT_TRUE(set(m, {"#123456"}).has_value());
-    EXPECT_EQ(next(m), "default") << "from custom, next is the first";
-    EXPECT_TRUE(req_(m, req::Profile{"custom"}).has_value());
-    const auto e = req_(m, req::Profile{"nope"});
+    EXPECT_EQ(m.persisted().active_profile, "custom");
+    EXPECT_EQ(set(m, {"custom"}), Change::OutputAndPersist) << "custom is the colors last set";
+    EXPECT_EQ(m.persisted().active_profile, "custom");
+
+    const auto e = set(m, {"nope"});
     ASSERT_FALSE(e.has_value());
-    EXPECT_TRUE(contains(e.error(), "unknown profile: nope")) << e.error();
+    EXPECT_TRUE(contains(e.error(), "unknown profile or color")) << e.error();
+}
+
+TEST(Model, SetNeedsSomethingToSetAndChangesNothingWhenItFails) {
+    Model m = hex_model();
+    const PersistedState before = m.persisted();
+    for (auto r : {set(m, {}), set(m, {"#ff0000", "#00ff00"}), set(m, {"#ff0000"}, "wave"),
+                   set(m, {"#ff0000"}, "glow", std::uint8_t{0}), set(m, {"nope"}, "glow")}) {
+        EXPECT_FALSE(r.has_value());
+    }
+    EXPECT_EQ(m.persisted(), before) << "a bad request is all or nothing";
+}
+
+TEST(Model, SetEffectAndSpeedRefineTheCurrentLook) {
+    Model m = hex_model();
+    ASSERT_TRUE(
+        set(m, {"#ff0000", "#00ff00", "#0000ff", "#ffffff"}, "tide", std::uint8_t{80}).has_value());
+    EXPECT_EQ(in(m).effect, Effect::Tide);
+    EXPECT_EQ(in(m).speed, 80);
+    EXPECT_EQ(in(m).base, (Frame{R, G, B, W}));
+
+    ASSERT_TRUE(set(m, {}, std::nullopt, std::uint8_t{20}).has_value());
+    EXPECT_EQ(in(m).effect, Effect::Tide) << "speed alone keeps the effect";
+    EXPECT_EQ(in(m).speed, 20);
+
+    ASSERT_TRUE(set(m, {}, "glow").has_value());
+    EXPECT_EQ(in(m).base, (Frame{R, G, B, W})) << "an effect alone keeps the colors";
+    EXPECT_EQ(in(m).effect, Effect::Glow);
+
+    ASSERT_TRUE(set(m, {}, "static").has_value());
+    EXPECT_EQ(in(m).effect, Effect::Static);
+}
+
+TEST(Model, SetEffectStaticStopsAProfileThatHasItsOwnEffect) {
+    Model m = hex_model();
+    ASSERT_EQ(in(m).effect, Effect::Glow) << "the rgbw profile glows";
+    ASSERT_TRUE(set(m, {}, "static").has_value());
+    EXPECT_EQ(in(m).effect, Effect::Static);
 }
 
 TEST(Model, BrightnessRelativeClamps) {
@@ -177,48 +199,14 @@ TEST(Model, IdleDimLowersBrightness) {
     EXPECT_EQ(m.persisted().brightness, 100) << "user brightness unchanged";
 }
 
-TEST(Model, HintExpiresAfterTimeout) {
-    Model m = hex_model();
-    const TimePoint t0 = Clock::now();
-    ASSERT_TRUE(m.handle(req::Hint{"SUPER"}, t0).has_value());
-    EXPECT_EQ(m.inputs(t0)->hint, B);
-    EXPECT_EQ(m.hint_deadline(), t0 + 15s);
-    EXPECT_EQ(m.inputs(t0 + 16s)->hint, std::nullopt);
-}
-
-TEST(Model, LockClearsHint) {
-    Model m = hex_model();
-    ASSERT_TRUE(req_(m, req::Hint{"super"}).has_value());
-    m.apply_fact(fact::Locked{true});
-    EXPECT_EQ(in(m).hint, std::nullopt);
-}
-
-TEST(Model, ModifierHintBeatsSubmap) {
-    Model m = hex_model();
-    m.set_submap("resize");
-    EXPECT_EQ(in(m).hint, G);
-    ASSERT_TRUE(req_(m, req::Hint{"super"}).has_value());
-    EXPECT_EQ(in(m).hint, B);
-    ASSERT_TRUE(req_(m, req::Hint{"clear"}).has_value());
-    EXPECT_EQ(in(m).hint, G);
-    m.set_submap(std::nullopt);
-    EXPECT_EQ(in(m).hint, std::nullopt);
-}
-
-TEST(Model, UnconfiguredHintIsAnError) {
-    Model m = hex_model();
-    const auto e = req_(m, req::Hint{"ctrl+alt"});
-    ASSERT_FALSE(e.has_value());
-    EXPECT_TRUE(contains(e.error(), "no color configured for ctrl+alt")) << e.error();
-}
-
 TEST(Model, EffectRequestErrorsWhenDisabled) {
     Model m = model();
-    const auto e = req_(m, req::Effect{"glow", std::nullopt});
+    const auto e = set(m, {}, "glow");
     ASSERT_FALSE(e.has_value());
     EXPECT_TRUE(contains(e.error(), "enabled = true")) << e.error();
+    EXPECT_TRUE(set(m, {}, "static").has_value()) << "a solid color never needs the opt-in";
     Model h = hex_model();
-    EXPECT_EQ(req_(h, req::Effect{"tide", std::uint8_t{80}}), Change::OutputAndPersist);
+    EXPECT_EQ(set(h, {}, "tide", std::uint8_t{80}), Change::OutputAndPersist);
     const Inputs i = in(h);
     EXPECT_EQ(i.effect, Effect::Tide);
     EXPECT_EQ(i.speed, 80);
@@ -273,13 +261,11 @@ TEST(Model, UnknownFlagIsAnError) {
 
 // hyprlock never sets logind's LockedHint and unlocking it sends no Unlock signal, so the lock
 // state comes from hypridle's on_lock_cmd/on_unlock_cmd: `omen-kbd flag locked on|off`.
-TEST(Model, LockedFlagGatesBacklightAndClearsHint) {
+TEST(Model, LockedFlagGatesBacklight) {
     Model m = hex_model();
-    ASSERT_TRUE(req_(m, req::Hint{"super"}).has_value());
     EXPECT_EQ(req_(m, req::Flag{"locked", true}), Change::Output);
     Inputs i = in(m);
     EXPECT_FALSE(i.backlight) << "on_lock = off";
-    EXPECT_EQ(i.hint, std::nullopt) << "locking clears the hint";
     EXPECT_TRUE(m.status(nullptr).facts.locked);
     EXPECT_EQ(req_(m, req::Flag{"locked", false}), Change::Output);
     EXPECT_TRUE(in(m).backlight);
@@ -346,35 +332,25 @@ TEST(Model, FullscreenFactIsLowercasedWhereItEntersTheModel) {
     EXPECT_EQ(m.status(nullptr).facts.fullscreen_app, "kitty");
 }
 
-TEST(Model, UnknownThemeColorWarnsAndUsesWhite) {
-    Config cfg = parse_config("[[profiles]]\nname = 'x'\ncolors = ['theme:nope', '#000000', "
-                              "'#000000', '#000000']\n")
-                     .value();
-    Model m(std::move(cfg), palette(), PersistedState::default_for("x"), "mock");
-    EXPECT_EQ(in(m).base[0], W);
+TEST(Model, StoredCustomColorsThatAreInvalidWarnAndShowWhite) {
+    PersistedState st = PersistedState::default_for("x");
+    st.active_profile = "custom";
+    st.custom = std::vector<std::string>{"theme:mauve", "#000000", "#000000", "#000000"};
+    Config cfg = parse_config("[[profiles]]\nname = 'x'\ncolors = ['#000000']\n").value();
+    Model m(std::move(cfg), std::move(st), "mock");
+    EXPECT_EQ(in(m).base, (Frame{W, W, W, W}));
     const auto warnings = m.status(nullptr).warnings;
-    EXPECT_TRUE(std::ranges::any_of(
-        warnings, [](const std::string &w) { return contains(w, "unknown theme color: nope"); }));
+    EXPECT_TRUE(std::ranges::any_of(warnings, [](const std::string &w) {
+        return contains(w, "stored custom colors are invalid");
+    }));
 }
 
 TEST(Model, SuspendedYieldsNoInputs) {
     Model m = hex_model();
-    ASSERT_TRUE(req_(m, req::Hint{"super"}).has_value());
     m.set_suspended(true);
     EXPECT_FALSE(m.inputs(Clock::now()).has_value());
     m.set_suspended(false);
-    EXPECT_EQ(in(m).hint, std::nullopt) << "suspend cleared the hint";
-}
-
-// A hint can still arrive while suspended (a key event racing PrepareForSleep) and must expire all
-// the same: the daemon wakes at hint_deadline(), and a deadline in the past wakes it in a loop.
-TEST(Model, HintExpiresWhileSuspended) {
-    Model m = hex_model();
-    const TimePoint t0 = Clock::now();
-    m.set_suspended(true);
-    ASSERT_TRUE(m.handle(req::Hint{"super"}, t0).has_value());
-    EXPECT_FALSE(m.inputs(t0 + 16s).has_value());
-    EXPECT_EQ(m.hint_deadline(), std::nullopt);
+    EXPECT_TRUE(m.inputs(Clock::now()).has_value());
 }
 
 // Spec: "idle/lock/Fn-off/suspend → stop ticking", whatever the gate does to the backlight
@@ -459,17 +435,6 @@ TEST(Model, SuspendClearsClipsButKeepsLamps) {
     EXPECT_EQ(m.reaction_deadline(), t0 + 3600s) << "only the TTL is left";
 }
 
-TEST(Model, PaletteChangeRestylesLamps) {
-    Model m = react_model();
-    const TimePoint t0 = Clock::now();
-    m.apply_signal(signal::AgentWaiting{"s1", std::nullopt}, t0);
-    EXPECT_EQ(m.inputs(t0 + 1s)->lamps, lit(kPeach, {Zone::Wasd}));
-
-    m.set_palette(Palette::from_waybar_css("@define-color peach #102030;\n"));
-    EXPECT_EQ(m.inputs(t0 + 2s)->lamps, lit(Rgb{0x10, 0x20, 0x30}, {Zone::Wasd}));
-    EXPECT_EQ(m.status(nullptr).reactions.lamps, std::vector<std::string>{"agent"});
-}
-
 TEST(Model, HwBacklightReadingIsFreshFor5s) {
     Model m = react_model();
     const TimePoint t0 = Clock::now();
@@ -526,13 +491,13 @@ TEST(Model, ReactionsNeedAVisibleKeyboard) {
     EXPECT_TRUE(empty(in.lamps));
 
     Model dark = react_model();
-    ASSERT_TRUE(dark.handle(req::Brightness{"0"}, t0).has_value());
+    ASSERT_TRUE(dark.handle(req::Brightness{"0"}).has_value());
     dark.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
     EXPECT_TRUE(empty(dark.inputs(t0)->transient));
 
     // A dimmed keyboard is still visible: a lamp shows while the user is idle, a clip does not.
     Model idle = react_model();
-    ASSERT_TRUE(idle.handle(req::Idle{true}, t0).has_value()); // on_idle = dim
+    ASSERT_TRUE(idle.handle(req::Idle{true}).has_value()); // on_idle = dim
     idle.apply_signal(signal::WorkspaceSwitched{1, 2}, t0);
     idle.apply_signal(signal::UrgentRaised{"a1"}, t0);
     in = idle.inputs(t0).value();
@@ -551,29 +516,9 @@ TEST(Model, ReloadRefreshesTheReactionDeadline) {
 
     std::string shorter(kReactCfg);
     shorter.replace(shorter.find("ttl_s = 3600"), 12, "ttl_s = 60");
-    m.replace_config(parse_config(shorter).value(), palette());
+    m.replace_config(parse_config(shorter).value());
     EXPECT_EQ(m.reaction_deadline(), t0 + 60s);
     EXPECT_EQ(m.status(nullptr).reactions.lamps, std::vector<std::string>{"agent"});
-}
-
-TEST(Model, ReactionColorWarningsShowOnlyWhileEnabled) {
-    std::string cfg(kReactCfg);
-    cfg.replace(cfg.find("#0a141e"), 7, "theme:nope");
-    const auto warned = [](const Model &m) {
-        const auto w = m.status(nullptr).warnings;
-        return std::ranges::any_of(
-            w, [](const std::string &s) { return contains(s, "unknown theme color: nope"); });
-    };
-    Model on = react_model(cfg);
-    EXPECT_TRUE(warned(on));
-
-    // Fixed by a reload, the warning goes.
-    on.replace_config(parse_config(kReactCfg).value(), palette());
-    EXPECT_FALSE(warned(on));
-
-    // Reactions off resolve nothing anyone would see, so they warn about nothing.
-    cfg.replace(cfg.find("[reactions]\n"), 12, "[reactions]\nenabled = false\n");
-    EXPECT_FALSE(warned(react_model(cfg)));
 }
 
 // Ruling P17: when the visibility changes without a frame after it (the daemon forgets its

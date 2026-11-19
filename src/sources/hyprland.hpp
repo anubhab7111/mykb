@@ -19,11 +19,6 @@ namespace omenkbd {
 /// What a socket2 line says, and no more: no event carries a window title. Window addresses are
 /// lowercase hex without `0x` (R8).
 namespace hypr {
-/// `nullopt` = the default (no) submap.
-struct Submap {
-    std::optional<std::string> name;
-    friend bool operator==(const Submap &, const Submap &) = default;
-};
 /// `id` > 0 for a workspace, < 0 for a special one.
 struct WorkspaceV2 {
     int id;
@@ -65,9 +60,9 @@ struct Disconnected {
 };
 } // namespace hypr
 
-using HyprEvent = std::variant<hypr::Submap, hypr::WorkspaceV2, hypr::OpenWindow, hypr::CloseWindow,
-                               hypr::Urgent, hypr::ActiveWindow, hypr::ActiveWindowV2,
-                               hypr::Fullscreen, hypr::Connected, hypr::Disconnected>;
+using HyprEvent = std::variant<hypr::WorkspaceV2, hypr::OpenWindow, hypr::CloseWindow, hypr::Urgent,
+                               hypr::ActiveWindow, hypr::ActiveWindowV2, hypr::Fullscreen,
+                               hypr::Connected, hypr::Disconnected>;
 
 /// One socket2 line (`EVENT>>DATA`, without the newline) ⇒ the event, or nullopt for an event we
 /// do not use, a malformed line (an invalid window address among them: only an empty
