@@ -77,14 +77,14 @@ std::expected<Rule, std::string> parse_rule(const toml::table &t);
 /// An overlay chosen by the rules.
 struct ZonesOverlay {
     std::vector<Zone> zones;
-    Rgb color;
-    bool pulse;
+    Rgb color{};
+    bool pulse = false;
     friend bool operator==(const ZonesOverlay &, const ZonesOverlay &) = default;
 };
 
 struct TintOverlay {
-    Rgb color;
-    double strength;
+    Rgb color{};
+    double strength = 0.0;
     friend bool operator==(const TintOverlay &, const TintOverlay &) = default;
 };
 

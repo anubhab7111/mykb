@@ -267,6 +267,10 @@ bool Model::wants_animation() const {
     return is_animated(shown_effect(shown_profile(r))) || pulsing;
 }
 
+// GCC 16 at -O3 reports the padding of the overlay's ZonesOverlay as uninitialized when `Inputs` is
+// moved into the returned optional. Every member is initialized above; this is a false positive.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 std::optional<Inputs> Model::inputs(TimePoint now) {
     if (suspended_) {
         return std::nullopt;
@@ -281,11 +285,20 @@ std::optional<Inputs> Model::inputs(TimePoint now) {
         effect = persisted_.effect_override->effect;
         speed = persisted_.effect_override->speed;
     }
+    std::optional<Overlay> overlay;
+    if (r.overlay) {
+        if (const auto *z = std::get_if<ZonesOverlay>(&*r.overlay)) {
+            overlay = ZonesOverlay{z->zones, z->color, z->pulse};
+        } else {
+            const auto &t = std::get<TintOverlay>(*r.overlay);
+            overlay = TintOverlay{t.color, t.strength};
+        }
+    }
     Inputs in{.base = base,
               .effect = effect,
               .speed = speed,
               .animate = animation_allowed() && hw_backlight_ != false,
-              .overlay = r.overlay,
+              .overlay = std::move(overlay),
               .brightness = effective_brightness(r),
               .backlight = backlight_wanted(),
               .lamps = layers.lamps,
@@ -293,6 +306,7 @@ std::optional<Inputs> Model::inputs(TimePoint now) {
     frame_warnings_ = std::move(warnings);
     return in;
 }
+#pragma GCC diagnostic pop
 
 Status Model::status(const Output *out) const {
     const RuleOutcome r = rules();
