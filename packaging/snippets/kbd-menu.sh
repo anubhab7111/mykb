@@ -86,7 +86,10 @@ while true; do
 		;;
 	Power*) run toggle ;;
 	Effect)
-		sel=$(printf '%s\n' static breathe wave cycle gradient | icons "$ic_effect" | menu "Effect" "$(state)") || continue
+		# drift, glow, tide and dusk are the slow Catppuccin glows. Like gradient they use the active
+		# profile's colors; for the ready-made versions pick the profiles of the same names.
+		sel=$(printf '%s\n' static breathe wave cycle gradient drift glow tide dusk |
+			icons "$ic_effect" | menu "Effect" "$(state)  ·  glows use the active profile's colors") || continue
 		spd=""
 		if [ "$sel" != static ]; then
 			spd=$(printf '%s\n' "slow (20)" "medium (50)" "fast (80)" | icons "$ic_effect" | menu "Speed" "$sel") || continue
