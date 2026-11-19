@@ -133,8 +133,7 @@ std::expected<Change, std::string> Model::handle(const Request &r, TimePoint now
         const auto effect = effect_from_name(e->name);
         if (!effect) {
             return R(std::unexpect,
-                     std::format("unknown effect \"{}\" (expected static, breathe, wave, cycle, "
-                                 "gradient, drift, glow, tide or dusk)",
+                     std::format("unknown effect \"{}\" (expected static, drift, glow, tide or dusk)",
                                  e->name));
         }
         if (*effect == Effect::Static) {

@@ -80,10 +80,10 @@ TEST(Cli, CommandsMapToRequests) {
     EXPECT_EQ(parse({"on"}).first, Request{req::Power{req::PowerAction::On}});
     EXPECT_EQ(parse({"off"}).first, Request{req::Power{req::PowerAction::Off}});
     EXPECT_EQ(parse({"toggle"}).first, Request{req::Power{req::PowerAction::Toggle}});
-    EXPECT_EQ(parse({"effect", "wave"}).first, (Request{req::Effect{"wave", std::nullopt}}));
-    EXPECT_EQ(parse({"effect", "breathe", "--speed", "80"}).first,
-              (Request{req::Effect{"breathe", std::uint8_t{80}}}));
-    EXPECT_FALSE(parse({"effect", "wave", "--speed", "0"}).first.has_value());
+    EXPECT_EQ(parse({"effect", "glow"}).first, (Request{req::Effect{"glow", std::nullopt}}));
+    EXPECT_EQ(parse({"effect", "tide", "--speed", "80"}).first,
+              (Request{req::Effect{"tide", std::uint8_t{80}}}));
+    EXPECT_FALSE(parse({"effect", "glow", "--speed", "0"}).first.has_value());
     EXPECT_EQ(parse({"hint", "super+shift"}).first, Request{req::Hint{"super+shift"}});
     EXPECT_EQ(parse({"idle", "on"}).first, Request{req::Idle{true}});
     EXPECT_FALSE(parse({"idle", "maybe"}).first.has_value());

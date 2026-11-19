@@ -36,7 +36,7 @@ resize = "#00ff00"
 [[profiles]]
 name = "rgbw"
 colors = ["#ff0000", "#00ff00", "#0000ff", "#ffffff"]
-effect = "wave"
+effect = "glow"
 [[profiles]]
 name = "game"
 colors = ["#202020", "#202020", "#202020", "#ff0000"]
@@ -214,13 +214,13 @@ TEST(Model, UnconfiguredHintIsAnError) {
 
 TEST(Model, EffectRequestErrorsWhenDisabled) {
     Model m = model();
-    const auto e = req_(m, req::Effect{"wave", std::nullopt});
+    const auto e = req_(m, req::Effect{"glow", std::nullopt});
     ASSERT_FALSE(e.has_value());
     EXPECT_TRUE(contains(e.error(), "enabled = true")) << e.error();
     Model h = hex_model();
-    EXPECT_EQ(req_(h, req::Effect{"breathe", std::uint8_t{80}}), Change::OutputAndPersist);
+    EXPECT_EQ(req_(h, req::Effect{"tide", std::uint8_t{80}}), Change::OutputAndPersist);
     const Inputs i = in(h);
-    EXPECT_EQ(i.effect, Effect::Breathe);
+    EXPECT_EQ(i.effect, Effect::Tide);
     EXPECT_EQ(i.speed, 80);
 }
 

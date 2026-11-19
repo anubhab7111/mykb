@@ -62,7 +62,7 @@ colors = ["#101010", "#202020", "#303030", "#404040"]
 [[profiles]]
 name = "wavy"
 colors = ["#101010", "#202020", "#303030", "#404040"]
-effect = "cycle"
+effect = "drift"
 
 [[rules]]
 name = "fullscreen video dims"

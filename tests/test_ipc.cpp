@@ -59,7 +59,7 @@ TEST(Ipc, EveryRequestRoundtrips) {
         req::Brightness{"-10"},
         req::Power{req::PowerAction::On},
         req::Power{req::PowerAction::Off},
-        req::Effect{"wave", std::uint8_t{80}},
+        req::Effect{"glow", std::uint8_t{80}},
         req::Effect{"static", std::nullopt},
         req::Hint{"super+shift"},
         req::Idle{true},
@@ -76,7 +76,7 @@ TEST(Ipc, EveryRequestRoundtrips) {
         ASSERT_TRUE(back.has_value()) << encode(r) << " -> " << back.error();
         EXPECT_EQ(*back, r) << encode(r);
     }
-    EXPECT_TRUE(decode_request(R"({"cmd":"effect","name":"wave"})").has_value())
+    EXPECT_TRUE(decode_request(R"({"cmd":"effect","name":"glow"})").has_value())
         << "speed may be omitted";
 }
 
