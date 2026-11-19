@@ -4,5 +4,5 @@
 -- HYPRLAND_INSTANCE_SIGNATURE; it still finds Hyprland's socket without it).
 -- Install the unit first (packaging/omen-kbd.service).
 
-    -- Keyboard colors (omen-kbd daemon; profiles, mode colors, theme)
+    -- Keyboard colors (omen-kbd daemon)
     "systemctl --user start omen-kbd.service",

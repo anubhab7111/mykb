@@ -8,17 +8,17 @@
 # Uses your own rofi config and theme; icons come from rofi's icon theme through the row's icon
 # field, so they show inside the icon box. Escape goes back one level; Escape at the top closes it.
 # It only calls the omen-kbd CLI, so every change goes through the daemon like any other command.
+# "Look" is one flow for `omen-kbd set`: a profile or colors, then an effect and its speed.
 set -u
 
 bin=~/.local/bin/omen-kbd
 cfg=~/.config/omen-kbd/config.toml
 
 # Icon names in the rofi icon theme (candy-icons here; other themes fall back to a generic icon).
-ic_profile=preferences-desktop-keyboard
+ic_look=preferences-desktop-keyboard
 ic_brightness=preferences-desktop-display
 ic_power=system-shutdown
 ic_effect=preferences-system-windows-effect-flipswitch
-ic_color=preferences-color
 ic_doctor=utilities-system-monitor
 
 menu() { # menu <prompt> [message]: rows on stdin, the picked text on stdout
@@ -61,58 +61,49 @@ if ! "$bin" status >/dev/null 2>&1; then
 	exit 2
 fi
 
-accents="rosewater flamingo pink mauve red maroon peach yellow green teal sky sapphire blue lavender"
-
 while true; do
 	# Piped straight into rofi: a $( ) capture would drop the NUL bytes that carry the icons.
 	pick=$(
 		{
-			row Profile "$ic_profile"
+			row Look "$ic_look"
 			row Brightness "$ic_brightness"
 			row "Power: toggle" "$ic_power"
-			row Effect "$ic_effect"
-			row Color "$ic_color"
 			row Doctor "$ic_doctor"
 		} | menu "Keyboard" "$(state)"
 	) || exit 0
 	case "$pick" in
-	Profile)
-		sel=$( (profiles; echo custom) | icons "$ic_profile" | menu "Profile" "$(state)") || continue
-		run profile "$sel"
+	Look)
+		sel=$( (
+			profiles
+			echo "Colors…"
+			echo "Effect only…"
+		) | icons "$ic_look" | menu "Look" "$(state)") || continue
+		args=()
+		case "$sel" in
+		"Colors…")
+			txt=$(ask "Colors" "1 color, or 4: left middle right wasd (e.g. #ff2d95 #7a3cff #00c2ff #ffb000)") || continue
+			read -ra args <<<"$txt" # one to four words
+			;;
+		"Effect only…") ;;
+		*) args=("$sel") ;;
+		esac
+		eff=$(printf '%s\n' keep static drift glow tide dusk |
+			icons "$ic_effect" | menu "Effect" "keep leaves the effect as it is") || continue
+		if [ "$eff" != keep ]; then
+			args+=(--effect "$eff")
+			if [ "$eff" != static ]; then
+				spd=$(printf '%s\n' "slow (20)" "medium (50)" "fast (80)" | icons "$ic_effect" | menu "Speed" "$eff") || continue
+				spd=${spd##*(}
+				args+=(--speed "${spd%)}")
+			fi
+		fi
+		[ "${#args[@]}" -gt 0 ] && run set "${args[@]}"
 		;;
 	Brightness)
 		sel=$(printf '%s\n' 100 75 50 25 10 0 +10 -10 | icons "$ic_brightness" | menu "Brightness %" "$(state)") || continue
 		run brightness "$sel"
 		;;
 	Power*) run toggle ;;
-	Effect)
-		# drift, glow, tide and dusk are the slow Catppuccin glows. Like gradient they use the active
-		# profile's colors; for the ready-made versions pick the profiles of the same names.
-		sel=$(printf '%s\n' static breathe wave cycle gradient drift glow tide dusk |
-			icons "$ic_effect" | menu "Effect" "$(state)  ·  glows use the active profile's colors") || continue
-		spd=""
-		if [ "$sel" != static ]; then
-			spd=$(printf '%s\n' "slow (20)" "medium (50)" "fast (80)" | icons "$ic_effect" | menu "Speed" "$sel") || continue
-			spd=${spd##*(}
-			spd=${spd%)}
-		fi
-		if [ -n "$spd" ]; then
-			run effect "$sel" --speed "$spd"
-		else
-			run effect "$sel"
-		fi
-		;;
-	Color)
-		sel=$( (
-			for a in $accents; do echo "theme:$a"; done
-			echo "Custom hex…"
-		) | icons "$ic_color" | menu "Color (all zones)" "$(state)") || continue
-		if [ "$sel" = "Custom hex…" ]; then
-			sel=$(ask "Hex" "1 color, or 4: left middle right wasd (e.g. ff2d95 7a3cff 00c2ff ffb000)") || continue
-		fi
-		read -ra cols <<<"$sel" # one to four words
-		[ "${#cols[@]}" -gt 0 ] && run set "${cols[@]}"
-		;;
 	Doctor)
 		out=$("$bin" doctor 2>&1)
 		printf '%s\n' "$out" | icons "$ic_doctor" | menu "doctor" "read-only checks" >/dev/null
