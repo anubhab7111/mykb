@@ -572,3 +572,37 @@ TEST(ReactionCosts, ASpentBudgetHidesTheLampsUntilAWriteSucceeds) {
     EXPECT_EQ(rig.frames().back(), lit);
     EXPECT_EQ(rig.frame_times().back(), 3000ms) << "at once, with no other event";
 }
+
+namespace {
+std::string glow_config() {
+    return std::string{kRigConfig} + R"(
+[[profiles]]
+name = "slow-drift"
+colors = ["#cba6f7", "#89b4fa", "#94e2d5", "#89b4fa"]
+effect = "drift"
+)";
+}
+} // namespace
+
+// The slow glows change their frame twice a second, though the daemon ticks at 10 fps.
+TEST(ReactionCosts, ASlowGlowCostsAtMostTwoWritesASecond) {
+    ReactionRig rig{glow_config()};
+    rig.request(req::Profile{"slow-drift"});
+    rig.run_for(10s);
+    EXPECT_LE(rig.writes(), 21u) << "the switch, then one frame per half second";
+    EXPECT_GE(rig.writes(), 18u) << "and the glow does move";
+}
+
+TEST(ReactionCosts, AReactionOnASlowGlowCostsAtMostTwoMoreWrites) {
+    ReactionRig plain{glow_config()};
+    plain.request(req::Profile{"slow-drift"});
+    ReactionRig pulsed{glow_config()};
+    pulsed.request(req::Profile{"slow-drift"});
+    pulsed.run_for(1s);
+    plain.run_for(1s);
+    pulsed.signal(signal::WindowOpened{});
+    pulsed.run_for(9s);
+    plain.run_for(9s);
+    EXPECT_GE(pulsed.writes(), plain.writes());
+    EXPECT_LE(pulsed.writes(), plain.writes() + 2u);
+}

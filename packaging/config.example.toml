@@ -76,6 +76,31 @@ colors = ["#202020", "#202020", "#202020", "#ff0000"]
 name = "white"
 colors = ["#ffffff"]
 
+# Slow Catppuccin glows. Their colors are theme colors, so they follow Mocha/Latte on their own.
+# Each changes the keyboard twice a second (7200 writes an hour, under a fifth of the budget).
+# `speed` (default 50) stretches or shortens the loop up to 4x either way. Needs [effects] enabled.
+# colors: drift and dusk use all four as stops; glow uses the first two; tide uses the first three
+# for the wave and the fourth (WASD) as a steady accent.
+[[profiles]]
+name = "drift"   # mauve, blue, teal flowing left to right, like the Hyprland border (32 s loop)
+colors = ["theme:mauve", "theme:blue", "theme:teal", "theme:blue"]
+effect = "drift"
+
+[[profiles]]
+name = "lavender-glow"   # the whole keyboard breathing between lavender and mauve (14 s)
+colors = ["theme:lavender", "theme:mauve", "theme:lavender", "theme:mauve"]
+effect = "glow"
+
+[[profiles]]
+name = "tide"   # a blue, sapphire and teal wave rolling back and forth, WASD steady mauve (20 s)
+colors = ["theme:blue", "theme:sapphire", "theme:teal", "theme:mauve"]
+effect = "tide"
+
+[[profiles]]
+name = "dusk"   # peach, pink, mauve and blue cross-fading warm to cool and back (36 s)
+colors = ["theme:peach", "theme:pink", "theme:mauve", "theme:blue"]
+effect = "dusk"
+
 [[rules]]
 name = "gamemode"
 when = { gamemode = true }

@@ -124,9 +124,12 @@ TEST(Model, ProfileNextCyclesConfigOrderSkippingCustom) {
     };
     EXPECT_EQ(next(m), "game");
     EXPECT_EQ(next(m), "white");
+    for (const char *glow : {"drift", "lavender-glow", "tide", "dusk"}) {
+        EXPECT_EQ(next(m), glow);
+    }
     EXPECT_EQ(next(m), "default");
     ASSERT_TRUE(req_(m, req::Profile{"prev"}).has_value());
-    EXPECT_EQ(m.persisted().active_profile, "white");
+    EXPECT_EQ(m.persisted().active_profile, "dusk");
     ASSERT_TRUE(set(m, {"#123456"}).has_value());
     EXPECT_EQ(next(m), "default") << "from custom, next is the first";
     EXPECT_TRUE(req_(m, req::Profile{"custom"}).has_value());

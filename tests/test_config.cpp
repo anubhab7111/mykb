@@ -3,14 +3,54 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
+#include <fstream>
 #include <gtest/gtest.h>
+#include <iterator>
+#include <string>
 #include <vector>
 
 using namespace omenkbd;
 
+TEST(Config, ExampleConfigShipsTheFourSlowGlowProfiles) {
+    const Config c = embedded_default();
+    const std::vector<std::pair<std::string, Effect>> want{{"drift", Effect::Drift},
+                                                           {"lavender-glow", Effect::Glow},
+                                                           {"tide", Effect::Tide},
+                                                           {"dusk", Effect::Dusk}};
+    for (const auto &[name, effect] : want) {
+        const auto it = std::ranges::find(c.profiles, name, &ProfileCfg::name);
+        ASSERT_NE(it, c.profiles.end()) << name;
+        EXPECT_EQ(it->effect, effect) << name;
+        EXPECT_EQ(it->colors.size(), 4u) << name;
+    }
+}
+
+TEST(Config, TheGlowSnippetParsesAndMatchesTheExampleConfig) {
+    std::ifstream f(std::string{OMEN_KBD_SOURCE_DIR} + "/packaging/snippets/catppuccin-glows.toml");
+    ASSERT_TRUE(f.good());
+    const std::string text{std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+    const auto snippet = parse_config(text);
+    ASSERT_TRUE(snippet.has_value()) << snippet.error();
+    ASSERT_EQ(snippet->profiles.size(), 4u);
+    const Config example = embedded_default();
+    for (const ProfileCfg &p : snippet->profiles) {
+        const auto it = std::ranges::find(example.profiles, p.name, &ProfileCfg::name);
+        ASSERT_NE(it, example.profiles.end()) << p.name;
+        EXPECT_EQ(it->effect, p.effect) << p.name;
+        EXPECT_EQ(it->colors.size(), p.colors.size()) << p.name;
+    }
+}
+
+TEST(Config, TheUnknownEffectErrorListsTheGlows) {
+    const auto r =
+        parse_config("[[profiles]]\nname = \"x\"\ncolors = [\"#ffffff\"]\neffect = \"sparkle\"\n");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_NE(r.error().find("drift, glow, tide or dusk"), std::string::npos) << r.error();
+}
+
 TEST(Config, ExampleConfigParses) {
     const Config c = embedded_default();
-    EXPECT_EQ(c.profiles.size(), 3u);
+    EXPECT_EQ(c.profiles.size(), 7u);
     EXPECT_FALSE(c.effects.enabled);
     EXPECT_TRUE(c.hints.modifiers.contains("super+shift"));
     EXPECT_EQ(c.hints.timeout_s, 15u);

@@ -100,7 +100,7 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
           [] { return req::Power{req::PowerAction::Toggle}; });
 
     auto *effect = app->add_subcommand("effect", "Run an effect (needs [effects] enabled = true)");
-    effect->add_option("name", x.a, "static, breathe, wave, cycle or gradient")->required();
+    effect->add_option("name", x.a, "static, breathe, wave, cycle, gradient, drift, glow, tide or dusk")->required();
     effect->add_option("--speed", x.speed, "1-100")->check(CLI::Range(1, 100));
     sends(effect, [&x] {
         return req::Effect{x.a, x.speed > 0 ? std::optional(static_cast<std::uint8_t>(x.speed))
