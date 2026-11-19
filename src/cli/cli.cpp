@@ -73,9 +73,7 @@ std::unique_ptr<CLI::App> make_app(Args &x) {
     status->add_flag("--json", x.json, "Print the status as JSON");
     sends(status, [] { return req::Status{}; });
 
-    auto *set = app->add_subcommand(
-        "set",
-        "Set the look: a profile, or colors, and an effect. Everything else is a refinement.");
+    auto *set = app->add_subcommand("set", "Set the look: a profile or colors, and an effect");
     set->add_option(
            "look", x.colors,
            "A profile name, or #rrggbb: one for every zone, or four (left middle right wasd)")

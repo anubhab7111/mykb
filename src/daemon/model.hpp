@@ -1,5 +1,5 @@
 #pragma once
-// Pure daemon state: config, palette, persisted state, system facts, gates and reactions →
+// Pure daemon state: config, persisted state, system facts, gates and reactions →
 // compositor inputs and status. No I/O, no clock of its own: callers pass `now`.
 
 #include "backend/backend.hpp"

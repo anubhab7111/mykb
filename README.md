@@ -2,20 +2,20 @@
 
 Keyboard color manager for the **HP OMEN 16-k0xxx (board 8A4E)** and its 4-zone RGB backlight
 (left, middle, right, WASD), built for a Hyprland desktop. One binary holds the user daemon, the
-CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
+CLI and a health check (`doctor`). Everything is a terminal command.
 
-- **Profiles:** static colors or software effects, plus brightness and on/off. Your last colors come
-  back after reboot, suspend, the Fn key and daemon restarts.
-- **Mode colors:** hold a configured modifier set (Super, Super+Shift, Ctrl, …) or enter a Hyprland
-  submap, and the whole keyboard shows that mode's color until you release it.
+- **One lighting command:** `omen-kbd set` takes a profile or colors, and an effect. Your last look
+  comes back after reboot, suspend, the Fn key and daemon restarts.
+- **Effects:** `static`, and four slow glows: `drift`, `glow`, `tide`, `dusk`.
+- **Colors are plain `#rrggbb`.** Nothing ships with a color except the `game` profile.
 - **Rules:** react to the power profile, battery, CPU temperature, game mode, lock and idle.
-- **Theme sync:** `theme:<name>` colors come from the rice's current theme and follow theme switches.
+- **Reactions:** short light cues for workspace switches, windows, notifications and Claude Code.
 
 ## Status
 
 | Part | State |
 |---|---|
-| Daemon, CLI, Waybar stream, Hyprland hook, `doctor` | Done. Tested against a mock backend and fake sysfs trees (GoogleTest, ASan + UBSan). |
+| Daemon, CLI, `doctor` | Done. Tested against a mock backend and fake sysfs trees (GoogleTest, ASan + UBSan). |
 | Kernel module `hp_omen_kbd` | Tested in a VM against a firmware emulator, and validated on this laptop's real firmware (P4, 2026-11-06). The stock kernel has no keyboard-RGB interface, so until the module is loaded, `omen-kbd daemon` exits with "no keyboard backend" and `doctor` reports a FAIL. Use `--backend mock` to try everything. |
 | Hardware validation | Done (P4): `docs/hardware-validation.md`, results in `docs/hardware-notes.md`. |
 | Install and soak | Done (P5, 2026-11-07): installed, autostarted, all desktop hooks working; results in `docs/hardware-notes.md`. |
@@ -24,7 +24,7 @@ CLI, a Waybar module, a health check (`doctor`) and the Hyprland hook generator.
 ## Safety
 
 - The kernel's own `hp-wmi` is never replaced or patched. The daemon runs as your user, not root.
-- No keylogging: the Hyprland hook looks only at the 8 modifier keys and logs nothing.
+- No keylogging: nothing reads keystrokes. Reactions use only window addresses and classes.
 - Colors are written only through the small `hp_omen_kbd` module. It is allowlisted to board 8A4E
   and was validated on that board's real firmware (P4, `docs/hardware-notes.md`); `readonly=1` still
   makes it refuse every write. It enforces ≥ 50 ms between writes and an hourly write budget. Each change is one atomic write of all four zones.
@@ -48,8 +48,7 @@ systemctl --user daemon-reload
 ```
 
 `~/.local/bin` is on the PATH of interactive shells (via `~/.bashrc`), but not on the PATH of
-Hyprland, hypridle or Waybar. So the snippets call `~/.local/bin/omen-kbd` by full path, and
-`gen-hyprland` writes the generating binary's full path into the hook.
+Hyprland or hypridle. So the snippets call `~/.local/bin/omen-kbd` by full path.
 
 ## Try it without hardware
 
@@ -60,33 +59,26 @@ before starting the real daemon, because both use the same socket.
 ```bash
 XDG_STATE_HOME=/tmp/omen-kbd-demo omen-kbd daemon --backend mock --mock-render &
 omen-kbd status
-omen-kbd waybar &                            # what Waybar sees: one JSON line per change
-omen-kbd set ff0000 00ff00 0000ff ffffff    # left middle right wasd: one write
-omen-kbd hint super                          # the Super mode color; expires after 15 s
-omen-kbd profile next
+omen-kbd set "#ff0000" "#00ff00" "#0000ff" "#ffffff"   # left middle right wasd: one write
+omen-kbd set game                                       # a profile from the config
 omen-kbd brightness -50
-omen-kbd off; omen-kbd on                    # backlight only; colors are kept
-omen-kbd effect wave                         # exit 1: effects are opt-in
-kill %2 %1
+omen-kbd off; omen-kbd on                               # backlight only; colors are kept
+omen-kbd set --effect glow                              # exit 1: effects are opt-in
+kill %1
 ```
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `status [--json]` | Current profile, zones, brightness, hint, active rules, backend, write count. |
-| `set <color> [<color> <color> <color>]` | Custom colors: one for every zone, or left middle right wasd. A color is `#rrggbb` or `theme:<name>`. |
-| `profile <name\|next\|prev\|custom>` | Switch profile. |
+| `status [--json]` | Current profile, effect, zones, brightness, active rules, backend, write count. |
+| `set [<profile> \| <color> [<color> <color> <color>]] [--effect NAME] [--speed 1-100]` | The one lighting command. A profile name from the config (or `custom`), or colors: one for every zone, or left middle right wasd, each `#rrggbb`. `--effect` is `static`, `drift`, `glow`, `tide` or `dusk`; `--speed` defaults to 50. With only `--effect` or `--speed` the current colors stay. Effects need `[effects] enabled = true`. |
 | `brightness <0-100\|+N\|-N>` | Brightness. `0` turns the backlight off; colors are kept. |
 | `on`, `off`, `toggle` | Firmware backlight. Colors are kept. |
-| `effect <static\|breathe\|wave\|cycle\|gradient\|drift\|glow\|tide\|dusk> [--speed 1-100]` | Run an effect. Needs `[effects] enabled = true`. |
-| `hint <mods\|clear>` | Show a mode color. Used by the Hyprland hook. |
 | `idle on\|off` | Idle gate. Used by hypridle. |
 | `flag <gamemode\|locked> on\|off` | Flags for rules and the lock gate. |
-| `reload` | Re-read `config.toml` and the theme palette. A broken file is rejected and the old config stays. |
-| `waybar` | Stream status lines for a Waybar custom module. |
-| `doctor` | Read-only checks: driver and `readonly`, permissions, competing writers, hp-wmi DKMS packages, daemon, hooks, theme. |
-| `gen-hyprland` | Print the Hyprland hook (`kbdlight.lua`) for mode colors. |
+| `reload` | Re-read `config.toml`. A broken file is rejected and the old config stays. |
+| `doctor` | Read-only checks: driver and `readonly`, permissions, competing writers, hp-wmi DKMS packages, daemon, hooks. |
 | `notify [--app TEXT] [--desktop-entry TEXT] [--urgency low\|normal\|critical]` | Report a desktop notification, for the notification flash. Used by `rice-notify-sound` (`notify-reaction.sh`). Urgency is case-insensitive. |
 | `agent <waiting\|working\|done\|end> --session ID [--window ADDR] [--source NAME]` | Report what a coding-agent session is doing, for the Claude lamp. Used by `omen-kbd-agent-hook`. `ID` is 1 to 128 bytes. `--window` is the Hyprland address of the session's terminal: 1 to 64 hex digits, optionally after `0x` (for `waiting` and `done` anything else exits 64; `working` and `end` take no window and ignore it); `--source` defaults to `claude`. |
 | `daemon [--backend auto\|mock\|hp-omen-kbd\|mainline-led] [--mock-render] [--no-sources]` | Run the daemon. `auto` only picks a real backend. |
@@ -99,15 +91,14 @@ Exit codes: `0` ok; `1` the daemon or the keyboard write reported an error (mess
 - `~/.config/omen-kbd/config.toml`: yours; omen-kbd never writes it. Start from
   `packaging/config.example.toml`, which is also the built-in default when the file is missing. Run
   `omen-kbd reload` after editing.
-- `~/.local/state/omen-kbd/state.json`: current profile, custom colors, brightness, on/off and the
+- `~/.local/state/omen-kbd/state.json`: current look (profile or custom colors, effect), brightness, on/off and the
   lifetime write counter. Written atomically, at most once a second.
 - `$XDG_RUNTIME_DIR/omen-kbd.sock`: the daemon's socket (mode 0600, JSON lines).
 
-## Slow Catppuccin glows
+## Effects
 
-Four slow ambient effects, for a profile's `effect` or `omen-kbd effect`. They take their stops from
-the profile's four colors, so with `theme:` colors they follow Mocha/Latte when the theme changes.
-The example config ships a profile for each (`drift`, `lavender-glow`, `tide`, `dusk`).
+`static` is a solid color and costs no writes. The other four are slow ambient glows, for a
+profile's `effect` or `omen-kbd set --effect`. They take their stops from the active colors.
 
 | Effect | Look | Colors used | Loop at speed 50 |
 |---|---|---|---|
@@ -116,29 +107,34 @@ The example config ships a profile for each (`drift`, `lavender-glow`, `tide`, `
 | `tide` | A wave rolls back and forth over three colors; WASD holds the fourth. | first three, WASD fourth | 20 s |
 | `dusk` | A cross-fade through the four colors and back. | all four, in order | 36 s |
 
+```bash
+omen-kbd set "#cba6f7" "#89b4fa" "#94e2d5" "#89b4fa" --effect drift --speed 40
+omen-kbd set --effect dusk        # same colors, another effect
+omen-kbd set --effect static      # stop
+```
+
 `speed` (1 to 100, default 50) shortens or stretches the loop up to 4 times either way. The frame
-changes **twice a second** whatever `[effects] fps` is, so a glow costs at most 7200 of the 40000
-hourly writes (`kSlowUpdatesPerSecond` in `src/core/effects.cpp`). Reactions, the Claude lamp and
-key hints draw on top as with any effect, and the battery pause and lock and idle gates apply.
-To add them to your own config, paste `packaging/snippets/catppuccin-glows.toml` into
-`~/.config/omen-kbd/config.toml`, run `omen-kbd reload`, then `omen-kbd profile drift`.
+changes **twice a second** whatever `[effects] fps` is, so an effect costs at most 7200 of the 40000
+hourly writes (`kUpdatesPerSecond` in `src/core/effects.cpp`). Reactions and the Claude lamp draw on
+top, and the battery pause and lock and idle gates apply.
 
 ## Reactions
 
 Short keyboard reactions to what happens on the desktop. Each one has a small, fixed write cost, and
 the tests pin those costs. They are driven by the `[reactions]` tables in `config.toml`; a missing
-`[reactions]` table means they are off.
+`[reactions]` table means they are off. No color is built in: a reaction with no color set is off,
+so until you add colors only the window pulses (which need none) run.
 
 | Reaction | When | What the keyboard does | Writes |
 |---|---|---|---|
-| Workspace sweep | You switch workspace | The accent color (`theme:lavender`) lights one zone at a time, left to right going up, right to left going down, 120 ms a step. WASD lights with the left zone. | 4 |
+| Workspace sweep | You switch workspace | The workspace color lights one zone at a time, left to right going up, right to left going down, 120 ms a step. WASD lights with the left zone. | 4 |
 | Window opened | A window opens | Every zone moves 50% toward white for 120 ms. | 2 |
 | Window closed | A window closes | Every zone dips to 35% for 120 ms. | 2 |
-| Attention light | A window that is not focused asks for attention (Hyprland `urgent`) | The right zone in `theme:yellow` blinks twice, then holds steady until every such window has been focused or closed. | 4 per episode |
+| Attention light | A window that is not focused asks for attention (Hyprland `urgent`) | The right zone blinks twice in the urgent color, then holds steady until every such window has been focused or closed. | 4 per episode |
 | Fullscreen video | The focused window is in true fullscreen and its class is in the rule's list (`mpv`, `vlc`, `firefox`, `chromium`) | Brightness is capped at 15% by a rule. Super+F only maximizes and does not count. | 1 in, 1 out |
-| Notification flash | swaync receives a notification | Every zone blinks once for 150 ms: `theme:red` if critical, the app's color from a table (ZapZap `theme:green`, Discord `#5865f2`), otherwise `theme:blue`. | 2 |
-| Claude lamp: waiting | A Claude Code session needs approval or input | WASD in `theme:peach` blinks twice, then holds steady until the session continues, finishes or ends. | 4 per episode, 0 if you are looking at a linked session |
-| Claude lamp: finished | A Claude Code session finishes its turn | WASD blinks once for 150 ms in `theme:green`. | 2 |
+| Notification flash | swaync receives a notification | Every zone blinks once for 150 ms: the critical color if critical, the app's color from a table, otherwise the notify color. | 2 |
+| Claude lamp: waiting | A Claude Code session needs approval or input | WASD blinks twice in the waiting color, then holds steady until the session continues, finishes or ends. | 4 per episode, 0 if you are looking at a linked session |
+| Claude lamp: finished | A Claude Code session finishes its turn | WASD blinks once for 150 ms in the done color. | 2 |
 
 - **Holding costs nothing.** The two waiting lights (attention, Claude) blink and then hold a steady
   color. They never pulse, so a lamp that stays lit for hours writes nothing more.
@@ -169,17 +165,16 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
   the lamp stuck after a subagent's own permission prompt is approved.
 - **Idle prompt.** About a minute after a turn ends, Claude Code's idle notification lights the same
   waiting lamp if you have not come back. Focusing the terminal or sending a prompt clears it.
-- **Colors on the keyboard.** With `[theme] colors = "vivid"`, `theme:` colors are boosted: the default
-  `theme:peach` shows as orange (`#ff7926`) on the zones. For a true amber use `"#ffb000"`.
-- **Layers, bottom to top:** profile or effect, rule overlay, lamps, mode hint (Super, Ctrl,
-  submap), short reaction, brightness caps and the backlight gates. A held modifier hides the lamps
-  while it is held; a notification during fullscreen video flashes at the dimmed brightness.
+- **Colors on the keyboard.** Pastel colors look washed out on RGB LEDs. Pick saturated ones, for
+  example orange `#ff7926` or amber `#ffb000` rather than a pastel peach.
+- **Layers, bottom to top:** profile or effect, rule overlay, lamps, short reaction, brightness caps
+  and the backlight gates. A notification during fullscreen video flashes at the dimmed brightness.
 - **Turning things off.** `enabled = false` turns the reactions off: their signals are dropped
   before any backlight read, so they cost no read and no write. The fullscreen dim is a rule, not a
   reaction, so it keeps working. Delete the rule `fullscreen video dims` to switch it off (with no
   `fullscreen_app` rule left, the daemon stops asking Hyprland about fullscreen). One reaction goes
   off with its own neutral value: `open = 0`, `close = 1`, or `blinks = 0` together with
-  `zones = []`. Colors are `#rrggbb` or `theme:<name>`.
+  `zones = []`. Colors are `#rrggbb`.
 - **What is never read or kept.** Keystrokes, window titles, notification text, Claude prompts and
   replies. Only a window's address and class are used, in memory. The Hyprland parser drops titles
   before anything else sees them, and nothing from Hyprland, swaync or Claude Code is logged except
@@ -196,31 +191,24 @@ the tests pin those costs. They are driven by the `[reactions]` tables in `confi
 omen-kbd never edits these files itself.
 
 1. **Start at login:** `autostart.lua`, after installing the unit above.
-2. **Mode colors:** run
-   `~/.local/bin/omen-kbd gen-hyprland > ~/dotfiles/config-hypr/.config/hypr/modules/kbdlight.lua`.
-   Then add `require("modules.kbdlight")` to `hyprland.lua`. Re-run it after changing `[hints]` or
-   moving the binary.
-3. **Lock and idle gates:** `hypridle.conf`.
+2. **Lock and idle gates:** `hypridle.conf`.
    - hyprlock never sets logind's `LockedHint`, and unlocking it sends no logind `Unlock`, so the
      daemon cannot see the lock from logind alone.
    - hypridle's `on_lock_cmd` / `on_unlock_cmd` run on every real session lock and unlock, however
      it started.
    - Without those two lines the keyboard stays lit on the lock screen.
-4. **Waybar:** `waybar-module.jsonc` and `waybar-style.css`. Click for the next profile,
-   right-click to toggle, scroll for brightness.
-5. **Theme switches:** `rice-theme.md`.
-6. **Game mode:** `gamemode.lua`.
-7. **Rofi menu:** `kbd-menu.sh` (profile, brightness, power, effect, color, doctor). Install it as
+3. **Game mode:** `gamemode.lua`.
+4. **Rofi menu:** `kbd-menu.sh` (look, brightness, power, doctor). Install it as
    `~/.local/bin/omen-kbd-menu` and bind it with the full path; the header comment has both lines.
-8. **Reactions config:** `reactions-config.toml`. Paste it into `~/.config/omen-kbd/config.toml`
+5. **Reactions config:** `reactions-config.toml`. Paste it into `~/.config/omen-kbd/config.toml`
    just before the rule named "power saver dims", then run `omen-kbd reload`. It holds the
    `[reactions]` tables and the rule `fullscreen video dims`. Rules are first-match per category,
    and both rules cap brightness, so the fullscreen rule has to come first.
-9. **Notification flash:** `notify-reaction.sh`. swaync runs only one script per notification, so
+6. **Notification flash:** `notify-reaction.sh`. swaync runs only one script per notification, so
    this replaces the subshell at the end of `rice-notify-sound` instead of being a second script.
    It adds one `omen-kbd notify` line inside the not-in-do-not-disturb branch, next to the ping,
    detached and with its output sent to `/dev/null`.
-10. **Claude lamp:** `claude-code-hooks.json` and the hook script. `cmake --install` puts
+7. **Claude lamp:** `claude-code-hooks.json` and the hook script. `cmake --install` puts
     `omen-kbd-agent-hook` next to `omen-kbd`, in `~/.local/bin`; it needs `jq`. Merge the `hooks`
     entries of the JSON file into the existing `hooks` object of `~/.claude/settings.json`, next to
     the `SessionStart` hook. Do not paste the file after the closing brace: two top-level objects
@@ -283,10 +271,10 @@ its `.expected` file lists exactly what they must print. After a kernel update w
 - **clangd:** `.clangd` points at `build/compile_commands.json`. Sources are globbed at build time,
   so a new file shows bogus errors until the next `cmake --build build`; restart clangd after that.
 - **Layout:**
-  - `src/core`: pure logic (colors, zones, palette, effects, rules, compositor).
+  - `src/core`: pure logic (colors, zones, effects, rules, compositor, reactions).
   - `src/backend`: mock, hp-omen-kbd sysfs and mainline LED backends.
   - `src/daemon`: model, epoll loop, writer thread.
-  - `src/sources`: Hyprland, theme, hwmon, system D-Bus.
+  - `src/sources`: Hyprland, hwmon, system D-Bus.
   - `src/ipc`, `src/cli`: socket protocol and command line.
   - `tests/`: GoogleTest.
   - `kernel/hp-omen-kbd`: the module, its core tests and the VM scenarios.

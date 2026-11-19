@@ -1,5 +1,10 @@
 # Install and soak (phase P5)
 
+> **Historical runbook.** It was written for the first install (P5). Since then the CLI was reduced
+> to one lighting command (`omen-kbd set`), and theme colors, hints, Waybar and `gen-hyprland` were
+> removed. Commands such as `profile`, `effect`, `hint` and `waybar` below no longer exist; see the
+> README for the current ones.
+
 P4 proved the module on this machine's firmware, with every load and write done by hand. P5 makes it
 permanent:
 - the package loads the module at every boot;
