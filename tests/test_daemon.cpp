@@ -817,10 +817,11 @@ TEST_F(DaemonTest, SignalsOnARunningEffectAddNoWrites) {
     }
     const auto window = zone_writes_since(a);
     const auto n = window.size();
-    // The effect's own 10 ticks a second (as in EffectTicksAtConfiguredFps), plus the frame of a
-    // periodic backlight probe; a frame per signal would add about 40.
+    // The effect's own 2 frames a second, the frames of the pulses the ticks sample (two pulses of
+    // two writes each), plus the frame of a periodic backlight probe; a frame per signal would add
+    // about 40.
     EXPECT_LE(n, 13u) << n << " writes in 1 s at 10 fps with about 40 signals";
-    EXPECT_GE(n, 5u) << n << " writes in 1 s at 10 fps";
+    EXPECT_GE(n, 3u) << n << " writes in 1 s at 10 fps";
     // The ticks did sample the signals: the effect alone never goes above #404040, while a 120 ms
     // pulse (one every 500 ms) lifts every zone half way to white, and at 10 fps a tick lands in
     // it.
