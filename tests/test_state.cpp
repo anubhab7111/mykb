@@ -36,7 +36,7 @@ TEST(State, SaveRoundtripsAndLeavesNoTmp) {
     PersistedState s;
     s.active_profile = "custom";
     s.custom = std::vector<std::string>{"#ff0000", "theme:blue"};
-    s.effect_override = EffectOverride{Effect::Breathe, 30};
+    s.effect_override = EffectOverride{Effect::Tide, 30};
     s.brightness = 40;
     s.on = false;
     s.lifetime_writes = 12345;
@@ -45,7 +45,7 @@ TEST(State, SaveRoundtripsAndLeavesNoTmp) {
     EXPECT_EQ(warning, std::nullopt);
     EXPECT_EQ(loaded, s);
     EXPECT_FALSE(std::filesystem::exists(d.path() / "a/b/state.json.tmp"));
-    EXPECT_NE(read_file(p).find("\"effect\": \"breathe\""), std::string::npos)
+    EXPECT_NE(read_file(p).find("\"effect\": \"tide\""), std::string::npos)
         << "same JSON shape as the Rust prototype";
 }
 

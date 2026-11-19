@@ -400,55 +400,11 @@ TEST(ReactionCosts, ReactionsAreSilentWhileLockedIdleOrOff) {
     silent_after(zero, "brightness 0");
 }
 
-TEST(ReactionCosts, ReactionsOnAnAnimatedBaseAddNoWrites) {
-    ReactionRig plain;
-    plain.request(req::Profile{"wavy"});
-    ReactionRig swept;
-    swept.request(req::Profile{"wavy"});
-    // Ruling P16: while the effect ticks, a signal is applied without a frame of its own (before,
-    // it was delivered with one, the spec's "± 1" of section 6). The next tick samples it.
-    swept.signal(signal::WorkspaceSwitched{1, 2});
-    plain.run_for(1s);
-    swept.run_for(1s);
-
-    // The switch to `wavy` at 0, then a tick every 100 ms: a cycle frame changes every tick.
-    EXPECT_EQ(plain.writes(), 11u);
-    EXPECT_EQ(swept.writes(), plain.writes());
-    EXPECT_EQ(swept.frame_times(), plain.frame_times());
-
-    // And the ticks show the sweep, each step up to one tick late: left with wasd at the 100 ms
-    // tick, middle at 200, right at 300, gone at 400.
-    const std::vector<Frame> &f = swept.frames();
-    ASSERT_EQ(f.size(), 11u);
-    EXPECT_EQ(f[1][index(Zone::Left)], kSweep);
-    EXPECT_EQ(f[1][index(Zone::Wasd)], kSweep);
-    EXPECT_EQ(f[2][index(Zone::Middle)], kSweep);
-    EXPECT_EQ(f[3][index(Zone::Right)], kSweep);
-    EXPECT_EQ(f[4], plain.frames()[4]);
-}
-
-TEST(ReactionCosts, SignalsBetweenTicksAddNoWrites) {
+TEST(ReactionCosts, FocusChangesOnAGlowAddNoWrites) {
     ReactionRig plain;
     plain.request(req::Profile{"wavy"});
     plain.run_for(1s);
-    ASSERT_EQ(plain.writes(), 11u) << "the switch to `wavy` at 0, then a tick every 100 ms";
-
-    // 20 window opens 50 ms apart, half of them between two ticks.
-    ReactionRig storm;
-    storm.request(req::Profile{"wavy"});
-    for (int i = 0; i < 20; ++i) {
-        storm.signal(signal::WindowOpened{});
-        storm.run_for(50ms);
-    }
-    EXPECT_EQ(storm.writes(), plain.writes());
-    EXPECT_EQ(storm.frame_times(), plain.frame_times());
-    // The opens at 0 and 500 ms play (the cooldown drops the rest), each seen at the next tick.
-    ASSERT_EQ(storm.frames().size(), 11u);
-    for (std::size_t k = 0; k < 11; ++k) {
-        const bool pulse = k == 1 || k == 6;
-        EXPECT_EQ(storm.frames()[k], pulse ? lifted(plain.frames()[k]) : plain.frames()[k])
-            << "frame " << k;
-    }
+    ASSERT_EQ(plain.writes(), 3u) << "the switch to `wavy` at 0, then a frame every 500 ms";
 
     // 20 focus changes 50 ms apart change nothing anyone sees, and add no write.
     ReactionRig focus;

@@ -37,13 +37,13 @@ TEST(Compositor, StaticPassthrough) {
 
 TEST(Compositor, EffectIgnoredWhenNotAnimating) {
     Inputs i = inputs();
-    i.effect = Effect::Cycle;
+    i.effect = Effect::Drift;
     Output out = compose(i, 0.0);
     EXPECT_EQ(out.zones, kBase);
     EXPECT_FALSE(out.animated);
     i.animate = true;
     out = compose(i, 0.0);
-    EXPECT_EQ(out.zones, (Frame{R, G, B, R})) << "cycle at t=0 when animating";
+    EXPECT_EQ(out.zones, render(Effect::Drift, kBase, 0.0, 50)) << "drift when animating";
     EXPECT_TRUE(out.animated);
 }
 
@@ -63,7 +63,7 @@ TEST(Compositor, ZoneOverlayReplacesOnlyNamedZones) {
 
 TEST(Compositor, HintBeatsEffectAndOverlay) {
     Inputs i = inputs();
-    i.effect = Effect::Cycle;
+    i.effect = Effect::Drift;
     i.animate = true;
     i.overlay = ResolvedTint{kBlack, 0.5};
     i.hint = Rgb{0x89, 0x26, 0xff};
@@ -78,7 +78,7 @@ TEST(Compositor, BrightnessScalesAndZeroTurnsBacklightOff) {
     EXPECT_EQ(out.zones[0], (Rgb{128, 0, 0}));
     EXPECT_TRUE(out.backlight);
     i.brightness = 0;
-    i.effect = Effect::Wave;
+    i.effect = Effect::Glow;
     i.animate = true;
     out = compose(i, 0.0);
     EXPECT_FALSE(out.backlight);
@@ -88,7 +88,7 @@ TEST(Compositor, BrightnessScalesAndZeroTurnsBacklightOff) {
 TEST(Compositor, BacklightInputFalseMeansOffAndNotAnimated) {
     Inputs i = inputs();
     i.backlight = false;
-    i.effect = Effect::Wave;
+    i.effect = Effect::Glow;
     i.animate = true;
     const Output out = compose(i, 0.0);
     EXPECT_FALSE(out.backlight);
@@ -97,7 +97,7 @@ TEST(Compositor, BacklightInputFalseMeansOffAndNotAnimated) {
 
 TEST(Compositor, AnimatedFalseWithHint) {
     Inputs i = inputs();
-    i.effect = Effect::Breathe;
+    i.effect = Effect::Tide;
     i.animate = true;
     i.hint = G;
     EXPECT_FALSE(compose(i, 0.0).animated);
@@ -166,7 +166,7 @@ TEST(Compositor, BrightnessZeroBlanksTheLayersAndTurnsTheBacklightOff) {
     constexpr Rgb flash{0, 255, 255};
     Inputs i = inputs();
     i.brightness = 0;
-    i.effect = Effect::Wave;
+    i.effect = Effect::Glow;
     i.animate = true;
     i.lamps = layer(Zone::Wasd, Paint{lamp});
     i.transient = layer(Zone::Left, Paint{flash});
@@ -255,7 +255,7 @@ TEST(Compositor, ReactionsNeverMakeTheFrameAnimated) {
 
 TEST(Compositor, EmptyLayersChangeNothing) {
     Inputs i = inputs();
-    i.effect = Effect::Cycle;
+    i.effect = Effect::Drift;
     i.speed = 50;
     i.animate = true;
     i.overlay = ResolvedTint{kBlack, 0.5};
@@ -265,7 +265,7 @@ TEST(Compositor, EmptyLayersChangeNothing) {
     ASSERT_TRUE(empty(i.lamps));
     ASSERT_TRUE(empty(i.transient));
 
-    Frame expected = render(Effect::Cycle, kBase, 1.3, 50);
+    Frame expected = render(Effect::Drift, kBase, 1.3, 50);
     for (Rgb &z : expected) {
         z = Rgb::lerp(z, kBlack, 0.5).scale(70);
     }

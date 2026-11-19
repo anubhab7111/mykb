@@ -10,13 +10,12 @@
 
 namespace omenkbd {
 
-/// A profile's lighting effect. Only `Static` costs no hardware writes over time.
+/// A lighting effect. Only `Static` costs no hardware writes over time.
 ///
-/// `Drift`, `Glow`, `Tide` and `Dusk` are slow ambient glows. They take their stops from the profile's
-/// colors (so `theme:` colors follow the desktop theme) and change the frame only twice a second.
-/// Drift and Dusk use all four colors as stops, Glow the first two, Tide the first three for the wave
-/// and the fourth (WASD) as a steady accent.
-enum class Effect { Static, Breathe, Wave, Cycle, Gradient, Drift, Glow, Tide, Dusk };
+/// The others are slow ambient glows. They take their stops from the active colors and change the
+/// frame only twice a second. Drift and Dusk use all four colors as stops, Glow the first two, Tide
+/// the first three for the wave and the fourth (WASD) as a steady accent.
+enum class Effect { Static, Drift, Glow, Tide, Dusk };
 
 std::string_view name(Effect e);
 
@@ -25,13 +24,9 @@ std::optional<Effect> effect_from_name(std::string_view s);
 
 constexpr bool is_animated(Effect e) { return e != Effect::Static; }
 
-/// Effect period in seconds: speed 100 ⇒ 0.5 s, speed 1 ⇒ 10 s (speed clamped to 1..100).
-double period_secs(std::uint8_t speed);
-
-/// Period of one of the slow glows in seconds: 32 (Drift), 14 (Glow), 20 (Tide) or 36 (Dusk) at
-/// speed 50, four times shorter at speed 100 and longer at speed 1 (speed clamped to 1..100).
-/// Other effects use `period_secs` and return it.
-double slow_period_secs(Effect effect, std::uint8_t speed);
+/// Period of one loop in seconds: 32 (Drift), 14 (Glow), 20 (Tide) or 36 (Dusk) at speed 50, four
+/// times shorter at speed 100 and longer at speed 1 (speed clamped to 1..100). 0 for Static.
+double period_secs(Effect effect, std::uint8_t speed);
 
 /// Renders `effect` at time `t` seconds. `Static` returns `base` unchanged.
 Frame render(Effect effect, const Frame &base, double t, std::uint8_t speed);

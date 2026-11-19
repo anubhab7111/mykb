@@ -236,8 +236,7 @@ std::expected<ProfileCfg, std::string> parse_profile(const toml::table &t) {
     if (*effect) {
         const auto e = effect_from_name(**effect);
         if (!e) {
-            return Err(std::format("{}: unknown effect \"{}\" (expected static, breathe, wave, "
-                                   "cycle, gradient, drift, glow, tide or dusk)",
+            return Err(std::format("{}: unknown effect \"{}\" (expected static, drift, glow, tide or dusk)",
                                    where, **effect));
         }
         p.effect = *e;
